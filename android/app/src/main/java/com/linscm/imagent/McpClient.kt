@@ -15,7 +15,7 @@ import java.net.URI
  * Handles handshake, message routing, and auto-reconnect.
  */
 class McpClient(
-    private val relayUrl: String,
+    private var relayUrl: String,
     private val onMessage: (String, JsonObject) -> Unit,
     private val onStatus: (Status) -> Unit
 ) {
@@ -29,12 +29,15 @@ class McpClient(
 
     private var lastCode: String = ""
 
+    fun setRelayUrl(url: String) { relayUrl = url }
+
     fun connect(code: String) {
         lastCode = code
         disconnect()
-
+        Log.i(TAG, "connect: relayUrl=[$relayUrl] code=[$code]")
         try {
             val uri = URI("ws://${relayUrl}/apk")
+            Log.i(TAG, "connect: uri=$uri")
             ws = object : WebSocketClient(uri) {
                 override fun onOpen(handshake: ServerHandshake?) {
                     Log.i(TAG, "WS opened, sending handshake")

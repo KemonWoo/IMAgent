@@ -23,8 +23,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var textContainer: LinearLayout
     private lateinit var chatMessages: LinearLayout
     private lateinit var inputText: EditText
-    private lateinit var sendBtn: ImageButton
-    private lateinit var voiceModeBtn: ImageButton
+    private lateinit var sendBtn: Button
+    private lateinit var voiceModeBtn: Button
 
     // Voice mode
     private lateinit var voiceContainer: LinearLayout
@@ -140,10 +140,12 @@ class MainActivity : AppCompatActivity() {
             setText(savedCode)
             inputType = InputType.TYPE_CLASS_NUMBER
             setSingleLine()
-            val p = layoutParams as LinearLayout.LayoutParams
-            p.topMargin = 16
         }
-        layout.addView(codeInput)
+        val codeParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = 16 }
+        layout.addView(codeInput, codeParams)
 
         AlertDialog.Builder(this)
             .setTitle("⚙️ 首次配置")
@@ -253,11 +255,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun connect() {
         val prefs = getSharedPreferences("imagent", MODE_PRIVATE)
+        val server = prefs.getString("server", "") ?: ""
         val code = prefs.getString("code", "") ?: ""
-        if (code.isEmpty()) {
+        android.util.Log.d("IMAgent", "connect() called: server=[$server] code=[$code]")
+        if (server.isEmpty() || code.isEmpty()) {
+            android.util.Log.w("IMAgent", "connect() aborted: empty server or code")
             updateStatus(McpClient.Status.DISCONNECTED)
             return
         }
+        mcp.setRelayUrl(server)
         mcp.connect(code)
     }
 
