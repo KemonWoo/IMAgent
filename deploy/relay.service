@@ -1,0 +1,15 @@
+[Unit]
+Description=IMAgent Relay - MCP Server for Agent-to-APK communication
+After=network.target
+
+[Service]
+Type=simple
+User=agent
+ExecStart=/usr/local/bin/imagent-relay -port 8088
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/imagent-relay.log
+StandardError=append:/var/log/imagent-relay.log
+
+[Install]
+WantedBy=multi-user.target

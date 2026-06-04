@@ -1,0 +1,40 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+imagent-relay
+*.apk
+*.aar
+*.onnx
+
+# Build outputs
+/dist/
+/build/
+/bin/
+/cmd/relay/relay
+/android/app/build/
+/android/.gradle/
+/android/build/
+/android/.idea/
+/android/local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+*.test
+
+# Model assets (downloaded via script, not in git)
+android/app/src/main/assets/models/

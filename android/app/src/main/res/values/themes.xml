@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.IMAgent" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">#8B5CF6</item>
+        <item name="colorPrimaryContainer">#1E1E3A</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorSecondary">#00C853</item>
+        <item name="android:colorBackground">#0F0F23</item>
+        <item name="android:statusBarColor">#0F0F23</item>
+        <item name="android:navigationBarColor">#0F0F23</item>
+    </style>
+</resources>

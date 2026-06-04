@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="status_online">#00C853</color>
+    <color name="status_connecting">#FFC107</color>
+    <color name="status_offline">#E53935</color>
+    <color name="status_error">#FF5252</color>
+</resources>
