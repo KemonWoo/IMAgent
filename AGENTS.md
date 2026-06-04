@@ -1,18 +1,35 @@
 # AGENTS.md — IMAgent 自部署指南
 
-> **Agent 读取此文件即可完成 IMAgent 的全自动部署。**
+> **人类一句话指令：** "去 https://github.com/KemonWoo/IMAgent 读 AGENTS.md 并按指示部署。"
 
-## 你是 Agent，要做的事
+## 步骤 1：判断用户所在地区（必须首先执行）
 
-人类说"给我部署一个语音 IM"→ 你执行以下流程：
+你收到的连接来自某个 IP 地址。你需要判断这个 IP 属于哪个国家，以选择最优部署方案。
 
+**执行以下命令获取真实公网 IP 归属地：**
+
+```bash
+curl -s http://ip-api.com/json/ | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(f'COUNTRY={d[\"countryCode\"]}')
+print(f'CITY={d[\"city\"]}')
+print(f'ISP={d[\"isp\"]}')
+"
 ```
-1. 克隆仓库
-2. 读本文 → 选部署路径
-3. 问人类必要信息 → 自动部署
-4. 编译 APK → 托管 → 生成二维码
-5. 人类扫码 → 完成
-```
+
+**根据 `COUNTRY` 值自动选择部署路径：**
+
+| COUNTRY | 首选方案 | 备选 |
+|---------|---------|------|
+| **CN** | 路径 C (cpolar 内网穿透) | 路径 A (自有服务器) |
+| **其他** | 路径 C (localhost.run 内网穿透) | 路径 A (自有服务器) |
+
+> **原则：优先内网穿透（零成本、本机运行），不行再问人类是否有服务器。**
+
+## 步骤 2：按对应路径自动部署
+
+选择路径后 → 无需问人类（除非路径需要 SSH 凭据）→ 直接执行。
 
 ---
 
