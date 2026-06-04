@@ -1,16 +1,25 @@
 package com.linscm.imagent
 
 import android.app.AlertDialog
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.widget.*
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.*
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : AppCompatActivity() {
 
@@ -24,7 +33,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var chatMessages: LinearLayout
     private lateinit var inputText: EditText
     private lateinit var sendBtn: Button
+    private lateinit var imageBtn: ImageButton
     private lateinit var voiceModeBtn: Button
+
+    // Image picker
+    private val pickImageLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? -> uri?.let { uploadImage(it) } }
 
     // Voice mode
     private lateinit var voiceContainer: LinearLayout
@@ -85,10 +100,17 @@ class MainActivity : AppCompatActivity() {
         voiceContainer = findViewById(R.id.voice_mode_container)
         subtitleYou = findViewById(R.id.subtitle_user)
         subtitleAI = findViewById(R.id.subtitle_ai)
+        sendBtn = findViewById(R.id.send_btn)
+        imageBtn = findViewById(R.id.image_btn)
+        voiceModeBtn = findViewById(R.id.voice_mode_btn)
+        voiceContainer = findViewById(R.id.voice_mode_container)
+        subtitleYou = findViewById(R.id.subtitle_user)
+        subtitleAI = findViewById(R.id.subtitle_ai)
         micBtn = findViewById(R.id.mic_btn)
         textModeBtn = findViewById(R.id.text_mode_btn)
 
         sendBtn.setOnClickListener { sendText() }
+        imageBtn.setOnClickListener { pickImageLauncher.launch("image/*") }
         voiceModeBtn.setOnClickListener { setMode(true) }
         textModeBtn.setOnClickListener { setMode(false) }
         settingsBtn.setOnClickListener { showSettings() }
@@ -255,20 +277,22 @@ class MainActivity : AppCompatActivity() {
                         val mime = file.get("mime")?.asString ?: ""
                         val ftype = file.get("type")?.asString ?: "file"
                         runOnUiThread {
-                            val sizeStr = when {
-                                size > 1_000_000 -> "%.1fMB".format(size / 1_000_000.0)
-                                size > 1_000 -> "%.1fKB".format(size / 1_000.0)
-                                else -> "${size}B"
+                            if (ftype == "image") {
+                                addImageBubble(url, name, size, null, false)
+                            } else {
+                                val sizeStr = when {
+                                    size > 1_000_000 -> "%.1fMB".format(size / 1_000_000.0)
+                                    size > 1_000 -> "%.1fKB".format(size / 1_000.0)
+                                    else -> "${size}B"
+                                }
+                                val emoji = when (ftype) {
+                                    "audio" -> "🎵"
+                                    "video" -> "🎬"
+                                    "document" -> "📄"
+                                    else -> "📎"
+                                }
+                                addBubble("$emoji $name ($sizeStr)\n$url", false)
                             }
-                            val emoji = when (ftype) {
-                                "image" -> "🖼️"
-                                "audio" -> "🎵"
-                                "video" -> "🎬"
-                                "document" -> "📄"
-                                else -> "📎"
-                            }
-                            val fileMsg = "$emoji $name ($sizeStr)\n$url"
-                            addBubble(fileMsg, false)
                         }
                     }
                 }
@@ -353,6 +377,154 @@ class MainActivity : AppCompatActivity() {
             gravity = if (isUser) Gravity.END else Gravity.START
         }
         chatMessages.addView(bubble, params)
+        (chatMessages.parent as? ScrollView)?.post {
+            (chatMessages.parent as ScrollView).fullScroll(View.FOCUS_DOWN)
+        }
+    }
+
+    // ── Image upload ──
+
+    private fun uploadImage(uri: Uri) {
+        val prefs = getSharedPreferences("imagent", MODE_PRIVATE)
+        val server = prefs.getString("server", "") ?: ""
+        if (server.isEmpty()) return
+
+        addBubble("📷 上传中...", true)
+
+        lifecycleScope.launch {
+            try {
+                val bitmap = withContext(Dispatchers.IO) {
+                    val input = contentResolver.openInputStream(uri)
+                        ?: return@withContext null
+                    BitmapFactory.decodeStream(input)?.also { input.close() }
+                } ?: run {
+                    runOnUiThread { Toast.makeText(this@MainActivity, "无法读取图片", Toast.LENGTH_SHORT).show() }
+                    return@launch
+                }
+
+                val compressed = withContext(Dispatchers.IO) {
+                    val (w, h) = bitmap.width to bitmap.height
+                    val ratio = 1024.0 / maxOf(w, h)
+                    val bmp = if (ratio < 1.0) {
+                        Bitmap.createScaledBitmap(bitmap, (w * ratio).toInt(), (h * ratio).toInt(), true)
+                    } else bitmap
+                    val bos = ByteArrayOutputStream()
+                    bmp.compress(Bitmap.CompressFormat.JPEG, 80, bos)
+                    bos.toByteArray()
+                }
+
+                val tmpFile = withContext(Dispatchers.IO) {
+                    val f = File(cacheDir, "upload_${System.currentTimeMillis()}.jpg")
+                    FileOutputStream(f).use { it.write(compressed) }
+                    f
+                }
+
+                val urlStr = "http://${server}/upload"
+                val boundary = "Boundary-${System.currentTimeMillis()}"
+                val conn = withContext(Dispatchers.IO) {
+                    val u = URL(urlStr)
+                    val c = u.openConnection() as HttpURLConnection
+                    c.requestMethod = "POST"
+                    c.doOutput = true
+                    c.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                    val out = DataOutputStream(c.outputStream)
+                    out.writeBytes("--$boundary\r\n")
+                    out.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"${tmpFile.name}\"\r\n")
+                    out.writeBytes("Content-Type: image/jpeg\r\n\r\n")
+                    tmpFile.inputStream().use { it.copyTo(out) }
+                    out.writeBytes("\r\n--$boundary--\r\n")
+                    out.flush()
+                    out.close()
+                    c
+                }
+                val respCode = conn.responseCode
+                val respBody = if (respCode in 200..299)
+                    conn.inputStream.bufferedReader().readText()
+                else
+                    conn.errorStream?.bufferedReader()?.readText() ?: ""
+                conn.disconnect()
+                tmpFile.delete()
+
+                if (respCode !in 200..299) {
+                    runOnUiThread {
+                        chatMessages.removeViewAt(chatMessages.childCount - 1)
+                        addBubble("❌ 上传失败: $respCode", false)
+                    }
+                    return@launch
+                }
+
+                val json = com.google.gson.JsonParser.parseString(respBody).asJsonObject
+                val dlUrl = json.get("url")?.asString ?: ""
+                val fileName = json.get("original")?.asString ?: tmpFile.name
+                val fileSize = json.get("size")?.asLong ?: compressed.size.toLong()
+
+                runOnUiThread {
+                    chatMessages.removeViewAt(chatMessages.childCount - 1)
+                    addImageBubble(dlUrl, fileName, fileSize, bitmap, true)
+                    mcp.sendText("[图片] $fileName ($dlUrl)")
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (chatMessages.childCount > 0)
+                        chatMessages.removeViewAt(chatMessages.childCount - 1)
+                    addBubble("❌ 上传失败: ${e.message}", false)
+                }
+            }
+        }
+    }
+
+    private fun addImageBubble(url: String, name: String, size: Long, bitmap: Bitmap?, isUser: Boolean) {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(8, 8, 8, 8)
+            background = GradientDrawable().apply {
+                setColor(if (isUser) 0xFF1E1E3A.toInt() else 0xFF25254A.toInt())
+                cornerRadius = 24f
+            }
+        }
+
+        if (bitmap != null) {
+            val thumb = Bitmap.createScaledBitmap(bitmap, 200, 200.coerceAtMost(
+                (200.0 * bitmap.height / bitmap.width).toInt()
+            ), true)
+            val img = ImageView(this).apply {
+                setImageBitmap(thumb)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                layoutParams = LinearLayout.LayoutParams(200, 200)
+            }
+            container.addView(img)
+        } else {
+            val icon = TextView(this).apply {
+                text = "🖼️"
+                textSize = 48f
+                gravity = Gravity.CENTER
+            }
+            container.addView(icon)
+        }
+
+        val sizeStr = when {
+            size > 1_000_000 -> "%.1fMB".format(size / 1_000_000.0)
+            size > 1_000 -> "%.1fKB".format(size / 1_000.0)
+            else -> "${size}B"
+        }
+        val info = TextView(this).apply {
+            text = "$name ($sizeStr)"
+            setTextColor(0xFFAAAAAA.toInt())
+            textSize = 12f
+            setPadding(8, 4, 8, 4)
+            gravity = Gravity.CENTER
+        }
+        container.addView(info)
+
+        val params = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            setMargins(16, 8, 16, 8)
+            gravity = if (isUser) Gravity.END else Gravity.START
+        }
+        chatMessages.addView(container, params)
         (chatMessages.parent as? ScrollView)?.post {
             (chatMessages.parent as ScrollView).fullScroll(View.FOCUS_DOWN)
         }
