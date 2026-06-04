@@ -1,4 +1,5 @@
-// Package transport handles WebSocket connections for Agent and APK peers.
+// Package transport handles WebSocket connections for Agent and APK peers,
+// plus P2P mesh HTTP endpoints (V3: node discovery, AI-to-AI routing).
 package transport
 
 import (
@@ -19,10 +20,11 @@ import (
 	"nhooyr.io/websocket/wsjson"
 
 	"github.com/KemonWoo/IMAgent/internal/mcp"
+	"github.com/KemonWoo/IMAgent/internal/p2p"
 	"github.com/KemonWoo/IMAgent/internal/session"
 )
 
-// Relay ties together MCP server, session manager, and WebSocket transport.
+// Relay ties together MCP server, session manager, WebSocket transport, and P2P mesh.
 type Relay struct {
 	sessions   *session.Manager
 	mcpSrv     *mcp.Server
@@ -30,15 +32,23 @@ type Relay struct {
 	uploadsDir string
 	logs       *ringBuffer
 	mu         sync.Mutex
+
+	// V3: P2P mesh
+	nodeID    p2p.NodeID
+	address   string // "host:port" for HTTP mesh calls
+	routing   *p2p.RoutingTable
+	peers     *p2p.PeerStore
+	gossiper  *p2p.Gossiper
+	forwarder *p2p.Forwarder
 }
 
 // NewRelay creates a new relay instance.
-func NewRelay(uploadsDir string) *Relay {
+// p2pNodeID and p2pAddress are empty if P2P is disabled.
+func NewRelay(uploadsDir, p2pNodeID, p2pAddress string) *Relay {
 	state := &mcp.AppState{}
 	sessions := session.NewManager()
 	logBuf := newRingBuffer(200)
 
-	// Capture log output into ring buffer
 	log.SetOutput(logBuf)
 
 	r := &Relay{
@@ -46,15 +56,150 @@ func NewRelay(uploadsDir string) *Relay {
 		state:      state,
 		uploadsDir: uploadsDir,
 		logs:       logBuf,
+		nodeID:     p2p.NodeID(p2pNodeID),
+		address:    p2pAddress,
+		routing:    p2p.NewRoutingTable(),
+		peers:      p2p.NewPeerStore(),
 	}
-	// MCP push callback sends to APK via session manager
+
+	// MCP push callback: agent → APK
 	r.mcpSrv = mcp.NewServer(state, func(msg []byte) error {
 		return r.sessions.RouteFromAgent(msg)
 	})
+
+	// V3: Wire P2P callbacks into MCP server
+	if p2pNodeID != "" {
+		// Gossiper for peer discovery
+		r.gossiper = p2p.NewGossiper(r.nodeID, r.address, r.peers, r.routing)
+		r.gossiper.Start()
+
+		// Forwarder for agent-to-agent routing
+		r.forwarder = p2p.NewForwarder(r.nodeID, r.routing, r.peers, func(agentID string, msg []byte) error {
+			return r.sessions.RouteToAgent(agentID, msg)
+		})
+
+		// Wire session changes → gossip
+		r.sessions.OnAgentsChange(func(agents []p2p.AgentRef) {
+			// Update local routing table
+			for _, a := range agents {
+				r.routing.Set(a.ID, r.nodeID)
+			}
+			// Gossip to peers
+			r.gossiper.GossipAgents(agents)
+		})
+
+		// Wire MCP mesh callbacks
+		r.mcpSrv.SetMeshCallbacks(&mcp.MeshCallbacks{
+			ListAgents: r.listAllAgents,
+			ChatAgent:  r.chatToAgent,
+			Broadcast:  r.broadcastToAll,
+		})
+	}
+
 	return r
 }
 
-// HandleAgentWS is the WebSocket handler for Agent (MCP) connections.
+// BootstrapPeers connects to initial mesh peers.
+func (r *Relay) BootstrapPeers(addrs []string) {
+	if r.gossiper != nil {
+		r.gossiper.Bootstrap(addrs)
+	}
+}
+
+// Stop shuts down P2P components.
+func (r *Relay) Stop() {
+	if r.gossiper != nil {
+		r.gossiper.Stop()
+	}
+}
+
+// ---------- Mesh callbacks for MCP server ----------
+
+func (r *Relay) listAllAgents() []mcp.AgentInfo {
+	var agents []mcp.AgentInfo
+
+	// Local agents
+	for _, a := range r.sessions.ListAgents() {
+		agents = append(agents, mcp.AgentInfo{
+			ID:     a.ID,
+			Name:   a.Name,
+			NodeID: string(r.nodeID),
+			Online: true,
+		})
+	}
+
+	// Remote agents from peers
+	for _, peer := range r.peers.List() {
+		for _, a := range peer.Agents {
+			// Don't duplicate if already in local list
+			dup := false
+			for _, existing := range agents {
+				if existing.ID == a.ID {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				agents = append(agents, mcp.AgentInfo{
+					ID:     a.ID,
+					Name:   a.Name,
+					NodeID: string(peer.ID),
+					Online: true,
+				})
+			}
+		}
+	}
+
+	return agents
+}
+
+func (r *Relay) chatToAgent(senderID, targetID, message string) (string, error) {
+	// Build agent-to-agent message
+	msg, _ := json.Marshal(map[string]interface{}{
+		"type":    "agent_chat",
+		"from":    "mesh",
+		"target":  targetID,
+		"content": message,
+	})
+
+	if err := r.forwarder.RouteMessage(targetID, msg); err != nil {
+		return "failed", err
+	}
+	return "routed", nil
+}
+
+func (r *Relay) broadcastToAll(senderID, message string) (int, error) {
+	count := 0
+
+	// Deliver to all local agents
+	msg, _ := json.Marshal(map[string]interface{}{
+		"type":    "agent_broadcast",
+		"from":    "mesh",
+		"content": message,
+	})
+	for _, a := range r.sessions.ListAgents() {
+		if a.ID == senderID {
+			continue // skip sender
+		}
+		if err := a.Send(msg); err == nil {
+			count++
+		}
+	}
+
+	// Forward to all remote agents via their relays
+	for _, peer := range r.peers.List() {
+		for _, agent := range peer.Agents {
+			if err := r.forwarder.RouteMessage(agent.ID, msg); err == nil {
+				count++
+			}
+		}
+	}
+
+	return count, nil
+}
+
+// ---------- Agent WebSocket handler (V3: multi-agent) ----------
+
 func (r *Relay) HandleAgentWS(w http.ResponseWriter, req *http.Request) {
 	conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
@@ -65,10 +210,14 @@ func (r *Relay) HandleAgentWS(w http.ResponseWriter, req *http.Request) {
 
 	ctx := context.Background()
 
-	// Write channel to serialize concurrent writes (MCP responses + APK→Agent push).
+	// V3: unique agent ID per connection
+	agentID := fmt.Sprintf("agent-%d-%d", time.Now().UnixMilli(), time.Now().UnixNano()%10000)
+
+	// Write channel to serialize concurrent writes.
 	writeCh := make(chan []byte, 64)
 	peer := &session.Peer{
-		ID:   "agent",
+		ID:   agentID,
+		Name: agentID, // default name, can be overridden later
 		Role: session.RoleAgent,
 		Send: func(msg []byte) error {
 			select {
@@ -80,7 +229,13 @@ func (r *Relay) HandleAgentWS(w http.ResponseWriter, req *http.Request) {
 		},
 	}
 	r.sessions.RegisterAgent(peer)
-	log.Printf("Agent connected")
+
+	// Update local routing table
+	if r.nodeID != "" {
+		r.routing.Set(agentID, r.nodeID)
+	}
+
+	log.Printf("Agent connected: %s (total: %d)", agentID, r.sessions.AgentCount())
 
 	// Writer goroutine
 	writeDone := make(chan struct{})
@@ -88,7 +243,7 @@ func (r *Relay) HandleAgentWS(w http.ResponseWriter, req *http.Request) {
 		defer close(writeDone)
 		for msg := range writeCh {
 			if err := wsjson.Write(ctx, conn, json.RawMessage(msg)); err != nil {
-				log.Printf("Agent write: %v", err)
+				log.Printf("Agent %s write: %v", agentID, err)
 				return
 			}
 		}
@@ -98,20 +253,22 @@ func (r *Relay) HandleAgentWS(w http.ResponseWriter, req *http.Request) {
 	for {
 		_, raw, err := conn.Read(ctx)
 		if err != nil {
-			log.Printf("Agent read: %v", err)
+			log.Printf("Agent %s read: %v", agentID, err)
 			break
 		}
 
-		var req mcp.JSONRPCRequest
-		if err := json.Unmarshal(raw, &req); err != nil {
-			log.Printf("Agent JSON parse: %v", err)
+		var mcpReq mcp.JSONRPCRequest
+		if err := json.Unmarshal(raw, &mcpReq); err != nil {
+			log.Printf("Agent %s JSON parse: %v", agentID, err)
 			continue
 		}
 
-		resp := r.mcpSrv.Handle(req)
+		// Set agent context before handling
+		r.mcpSrv.SetAgentID(agentID)
+		resp := r.mcpSrv.Handle(mcpReq)
 
 		// Update session code if voice_connect was called
-		if req.Method == "tools/call" {
+		if mcpReq.Method == "tools/call" {
 			_, code, _, _ := r.state.GetState()
 			if code != "" {
 				r.sessions.SetCode(code)
@@ -120,24 +277,29 @@ func (r *Relay) HandleAgentWS(w http.ResponseWriter, req *http.Request) {
 
 		respBytes, err := json.Marshal(resp)
 		if err != nil {
-			log.Printf("Agent marshal: %v", err)
+			log.Printf("Agent %s marshal: %v", agentID, err)
 			continue
 		}
 		select {
 		case writeCh <- respBytes:
 		default:
-			log.Printf("Agent write buffer full, dropping response")
+			log.Printf("Agent %s write buffer full, dropping response", agentID)
 		}
 	}
 
-	// Stop writer goroutine
+	// Cleanup
 	close(writeCh)
 	<-writeDone
 
-	r.sessions.RegisterAgent(nil) // unregister
+	r.sessions.UnregisterAgent(agentID)
+	if r.nodeID != "" {
+		r.routing.Remove(agentID)
+	}
+	log.Printf("Agent disconnected: %s (total: %d)", agentID, r.sessions.AgentCount())
 }
 
-// HandleAPKWS is the WebSocket handler for the phone APK.
+// ---------- APK WebSocket handler (unchanged from V2) ----------
+
 func (r *Relay) HandleAPKWS(w http.ResponseWriter, req *http.Request) {
 	conn, err := websocket.Accept(w, req, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
@@ -149,11 +311,9 @@ func (r *Relay) HandleAPKWS(w http.ResponseWriter, req *http.Request) {
 	ctx := context.Background()
 	connected := false
 
-	// Read timeout for initial handshake
 	handshakeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	// Wait for handshake
 	_, raw, err := conn.Read(handshakeCtx)
 	if err != nil {
 		log.Printf("APK handshake read: %v", err)
@@ -175,7 +335,6 @@ func (r *Relay) HandleAPKWS(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// V1: auto-accept if no agent, or verify code
 	if !r.sessions.HasAgent() {
 		wsjson.Write(ctx, conn, map[string]string{"status": "no_agent", "message": "Agent not connected yet."})
 		return
@@ -186,14 +345,10 @@ func (r *Relay) HandleAPKWS(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Handshake OK
 	wsjson.Write(ctx, conn, map[string]string{"status": "connected"})
 	connected = true
 	log.Printf("APK connected")
 
-	// Write channel to serialize concurrent writes (nhooyr/websocket is not
-	// safe for concurrent use — conn.Read in this goroutine and conn.Write
-	// from MCP push callback would conflict without serialization).
 	writeCh := make(chan []byte, 64)
 	peer := &session.Peer{
 		ID:   "apk",
@@ -210,7 +365,6 @@ func (r *Relay) HandleAPKWS(w http.ResponseWriter, req *http.Request) {
 	r.sessions.RegisterAPK(peer)
 	r.state.SetAPKConnected(true)
 
-	// Writer goroutine
 	writeDone := make(chan struct{})
 	go func() {
 		defer close(writeDone)
@@ -222,7 +376,6 @@ func (r *Relay) HandleAPKWS(w http.ResponseWriter, req *http.Request) {
 		}
 	}()
 
-	// Message loop
 	for {
 		_, raw, err := conn.Read(ctx)
 		if err != nil {
@@ -230,7 +383,6 @@ func (r *Relay) HandleAPKWS(w http.ResponseWriter, req *http.Request) {
 			break
 		}
 
-		// Route APK messages to Agent
 		var msg map[string]any
 		if err := json.Unmarshal(raw, &msg); err != nil {
 			continue
@@ -239,17 +391,63 @@ func (r *Relay) HandleAPKWS(w http.ResponseWriter, req *http.Request) {
 		r.sessions.RouteFromAPK(raw)
 	}
 
-	// Stop writer goroutine
 	close(writeCh)
 	<-writeDone
 
-	// Cleanup
 	r.sessions.UnregisterAPK()
 	r.state.SetAPKConnected(false)
 	log.Printf("APK disconnected (was_connected=%v)", connected)
 }
 
-// HandleUpload accepts multipart file uploads. Returns JSON with file URL and metadata.
+// ---------- P2P HTTP handlers (V3) ----------
+
+// HandleP2PAnnounce handles POST /p2p/announce
+func (r *Relay) HandleP2PAnnounce(w http.ResponseWriter, req *http.Request) {
+	if r.gossiper == nil {
+		http.Error(w, "P2P not enabled", http.StatusServiceUnavailable)
+		return
+	}
+	r.gossiper.HandleAnnounce(w, req)
+}
+
+// HandleP2PPeers handles GET /p2p/peers
+func (r *Relay) HandleP2PPeers(w http.ResponseWriter, req *http.Request) {
+	if r.gossiper == nil {
+		http.Error(w, "P2P not enabled", http.StatusServiceUnavailable)
+		return
+	}
+	r.gossiper.HandlePeers(w, req)
+}
+
+// HandleP2PAgents handles GET /p2p/agents
+func (r *Relay) HandleP2PAgents(w http.ResponseWriter, req *http.Request) {
+	if r.gossiper == nil {
+		http.Error(w, "P2P not enabled", http.StatusServiceUnavailable)
+		return
+	}
+	r.gossiper.HandleAgents(w, req)
+}
+
+// HandleP2PSync handles POST /p2p/sync
+func (r *Relay) HandleP2PSync(w http.ResponseWriter, req *http.Request) {
+	if r.gossiper == nil {
+		http.Error(w, "P2P not enabled", http.StatusServiceUnavailable)
+		return
+	}
+	r.gossiper.HandleSync(w, req)
+}
+
+// HandleP2PForward handles POST /p2p/forward
+func (r *Relay) HandleP2PForward(w http.ResponseWriter, req *http.Request) {
+	if r.forwarder == nil {
+		http.Error(w, "P2P not enabled", http.StatusServiceUnavailable)
+		return
+	}
+	r.forwarder.HandleForward(w, req)
+}
+
+// ---------- File upload handler ----------
+
 func (r *Relay) HandleUpload(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -259,7 +457,6 @@ func (r *Relay) HandleUpload(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Limit to 50MB
 	req.Body = http.MaxBytesReader(w, req.Body, 50<<20)
 
 	if err := req.ParseMultipartForm(32 << 20); err != nil {
@@ -276,7 +473,6 @@ func (r *Relay) HandleUpload(w http.ResponseWriter, req *http.Request) {
 	}
 	defer file.Close()
 
-	// Sanitize filename
 	origName := filepath.Base(header.Filename)
 	ext := filepath.Ext(origName)
 	safeName := fmt.Sprintf("%d_%s", time.Now().UnixMilli(), strings.Map(func(r rune) rune {
@@ -304,7 +500,6 @@ func (r *Relay) HandleUpload(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Detect MIME type
 	mimeType := header.Header.Get("Content-Type")
 	if mimeType == "" {
 		mimeType = mime.TypeByExtension(ext)

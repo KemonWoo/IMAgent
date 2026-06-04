@@ -1,5 +1,5 @@
 // Package mcp implements a minimal MCP server for IMAgent relay.
-// Supports: initialize, tools/list, tools/call (voice_connect, voice_speak, voice_reset).
+// Supports: initialize, tools/list, tools/call (voice_* + V3 agent_* tools).
 package mcp
 
 import (
@@ -33,8 +33,8 @@ type Error struct {
 
 // Tool definition.
 type Tool struct {
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
 	InputSchema InputSchema `json:"inputSchema"`
 }
 
@@ -53,11 +53,11 @@ type Property struct {
 
 // AppState holds the runtime state accessible to MCP tools.
 type AppState struct {
-	mu         sync.RWMutex
-	NexusID    string
-	Code       string
+	mu           sync.RWMutex
+	NexusID      string
+	Code         string
 	APKConnected bool
-	LastSpeak  string
+	LastSpeak    string
 }
 
 func (s *AppState) SetNexus(id, code string) {
@@ -88,11 +88,36 @@ func (s *AppState) GetState() (nexusID string, code string, apkConnected bool, l
 // Callback for pushing messages to APK.
 type PushFunc func(msg []byte) error
 
+// MeshCallbacks provides the MCP server access to the P2P mesh.
+type MeshCallbacks struct {
+	// ListAgents returns all known agents across the mesh.
+	ListAgents func() []AgentInfo
+	// ChatAgent sends a message to a specific agent. senderID is excluded from delivery.
+	ChatAgent func(senderID, targetAgentID, message string) (status string, err error)
+	// Broadcast sends a message to all known agents. senderID is excluded from delivery.
+	Broadcast func(senderID, message string) (count int, err error)
+}
+
+// AgentInfo describes an agent on the mesh.
+type AgentInfo struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	NodeID string `json:"node_id"`
+	Online bool   `json:"online"`
+}
+
 // Server handles MCP protocol messages.
 type Server struct {
-	state  *AppState
-	push   PushFunc
-	tools  []Tool
+	state           *AppState
+	push            PushFunc
+	mesh            *MeshCallbacks
+	currentAgentID  string // set before each Handle call
+	tools           []Tool
+}
+
+// SetAgentID sets the current agent ID for this request context.
+func (s *Server) SetAgentID(id string) {
+	s.currentAgentID = id
 }
 
 // NewServer creates a new MCP server.
@@ -139,11 +164,11 @@ func NewServer(state *AppState, push PushFunc) *Server {
 				InputSchema: InputSchema{
 					Type: "object",
 					Properties: map[string]Property{
-						"url":      {Type: "string", Description: "Download URL of the file (e.g. /dl/filename.png)"},
-						"name":     {Type: "string", Description: "Original filename"},
-						"size":     {Type: "integer", Description: "File size in bytes"},
-						"mime":     {Type: "string", Description: "MIME type (e.g. image/png)"},
-						"type":     {Type: "string", Description: "File category: image, audio, video, document, file"},
+						"url":  {Type: "string", Description: "Download URL of the file (e.g. /dl/filename.png)"},
+						"name": {Type: "string", Description: "Original filename"},
+						"size": {Type: "integer", Description: "File size in bytes"},
+						"mime": {Type: "string", Description: "MIME type (e.g. image/png)"},
+						"type": {Type: "string", Description: "File category: image, audio, video, document, file"},
 					},
 					Required: []string{"url", "name", "size", "mime", "type"},
 				},
@@ -153,12 +178,45 @@ func NewServer(state *AppState, push PushFunc) *Server {
 				Description: "Disconnect the current phone APK pairing and generate a new code.",
 				InputSchema: InputSchema{Type: "object", Properties: map[string]Property{}},
 			},
+			// V3: AI Community tools
+			{
+				Name:        "agent_list",
+				Description: "List all AI agents currently known across the mesh network. Returns agent ID, name, node, and online status.",
+				InputSchema: InputSchema{Type: "object", Properties: map[string]Property{}},
+			},
+			{
+				Name:        "agent_chat",
+				Description: "Send a message to another AI agent on the mesh. Target an agent by ID. The message is routed through the relay mesh to reach the destination agent.",
+				InputSchema: InputSchema{
+					Type: "object",
+					Properties: map[string]Property{
+						"target":  {Type: "string", Description: "Target agent ID to message."},
+						"message": {Type: "string", Description: "Message content to send to the target agent."},
+					},
+					Required: []string{"target", "message"},
+				},
+			},
+			{
+				Name:        "agent_broadcast",
+				Description: "Broadcast a message to ALL known AI agents on the mesh network.",
+				InputSchema: InputSchema{
+					Type: "object",
+					Properties: map[string]Property{
+						"message": {Type: "string", Description: "Message content to broadcast to all agents."},
+					},
+					Required: []string{"message"},
+				},
+			},
 		},
 	}
 }
 
+// SetMeshCallbacks wires the P2P mesh capabilities into the MCP server.
+func (s *Server) SetMeshCallbacks(cb *MeshCallbacks) {
+	s.mesh = cb
+}
+
 // Handle processes an incoming MCP request and returns a response.
-// If push is needed (e.g. voice_speak), it calls the push function.
 func (s *Server) Handle(request JSONRPCRequest) JSONRPCResponse {
 	switch request.Method {
 	case "initialize":
@@ -180,7 +238,7 @@ func (s *Server) handleInitialize(req JSONRPCRequest) JSONRPCResponse {
 			"protocolVersion": "2024-11-05",
 			"serverInfo": map[string]string{
 				"name":    "imagent-relay",
-				"version": "1.0.0",
+				"version": "3.0.0",
 			},
 			"capabilities": map[string]any{
 				"tools": map[string]any{},
@@ -212,9 +270,11 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) JSONRPCResponse {
 
 	switch params.Name {
 	case "voice_connect":
-		// Generate a deterministic 4-char code for V1
 		code := generateCode()
-		id := fmt.Sprintf("agent-%d", time.Now().UnixMilli())
+		id := s.currentAgentID
+		if id == "" {
+			id = fmt.Sprintf("agent-%d", time.Now().UnixMilli())
+		}
 		s.state.SetNexus(id, code)
 		resultContent = []map[string]any{
 			{"type": "text", "text": fmt.Sprintf("Pairing code: %s\nNexus ID: %s\nShare this code with the human. They enter it on the phone APK.", code, id)},
@@ -239,7 +299,6 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) JSONRPCResponse {
 			return s.errorResponse(req.ID, -32602, "text is required")
 		}
 		s.state.SetLastSpeak(args.Text)
-		// Push to APK
 		msg, _ := json.Marshal(map[string]string{
 			"type":    "tts",
 			"content": args.Text,
@@ -302,9 +361,8 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) JSONRPCResponse {
 	case "voice_reset":
 		s.state.SetNexus("", "")
 		s.state.SetAPKConnected(false)
-		// Notify APK
 		msg, _ := json.Marshal(map[string]string{
-			"type":   "reset",
+			"type": "reset",
 		})
 		if s.push != nil {
 			s.push(msg)
@@ -312,6 +370,16 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) JSONRPCResponse {
 		resultContent = []map[string]any{
 			{"type": "text", "text": "Disconnected. Call voice_connect to re-pair."},
 		}
+
+	// V3: AI Community tools
+	case "agent_list":
+		resultContent = s.handleAgentList()
+
+	case "agent_chat":
+		resultContent = s.handleAgentChat(params.Arguments, req.ID)
+
+	case "agent_broadcast":
+		resultContent = s.handleAgentBroadcast(params.Arguments, req.ID)
 
 	default:
 		return s.errorResponse(req.ID, -32601, fmt.Sprintf("unknown tool: %s", params.Name))
@@ -326,6 +394,99 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) JSONRPCResponse {
 	}
 }
 
+func (s *Server) handleAgentList() []map[string]any {
+	if s.mesh == nil || s.mesh.ListAgents == nil {
+		return []map[string]any{
+			{"type": "text", "text": "Mesh networking not enabled. Start relay with --p2p flag."},
+		}
+	}
+	agents := s.mesh.ListAgents()
+	if len(agents) == 0 {
+		return []map[string]any{
+			{"type": "text", "text": "No other agents discovered on the mesh yet."},
+		}
+	}
+
+	// Build a readable list
+	text := fmt.Sprintf("Known agents on mesh (%d):\n", len(agents))
+	for _, a := range agents {
+		text += fmt.Sprintf("  • %s (name: %s, node: %s, %s)\n",
+			a.ID, a.Name, a.NodeID, onlineText(a.Online))
+	}
+
+	return []map[string]any{
+		{"type": "text", "text": text},
+	}
+}
+
+func (s *Server) handleAgentChat(argsRaw json.RawMessage, reqID any) []map[string]any {
+	if s.mesh == nil || s.mesh.ChatAgent == nil {
+		return []map[string]any{
+			{"type": "text", "text": "Mesh networking not enabled. Start relay with --p2p flag."},
+		}
+	}
+
+	var args struct {
+		Target  string `json:"target"`
+		Message string `json:"message"`
+	}
+	json.Unmarshal(argsRaw, &args)
+
+	if args.Target == "" || args.Message == "" {
+		return []map[string]any{
+			{"type": "text", "text": "target and message are required"},
+		}
+	}
+
+	status, err := s.mesh.ChatAgent(s.currentAgentID, args.Target, args.Message)
+	if err != nil {
+		return []map[string]any{
+			{"type": "text", "text": fmt.Sprintf("Failed to send: %v", err)},
+		}
+	}
+
+	return []map[string]any{
+		{"type": "text", "text": fmt.Sprintf("Message sent to %s: %s", args.Target, status)},
+	}
+}
+
+func (s *Server) handleAgentBroadcast(argsRaw json.RawMessage, reqID any) []map[string]any {
+	if s.mesh == nil || s.mesh.Broadcast == nil {
+		return []map[string]any{
+			{"type": "text", "text": "Mesh networking not enabled. Start relay with --p2p flag."},
+		}
+	}
+
+	var args struct {
+		Message string `json:"message"`
+	}
+	json.Unmarshal(argsRaw, &args)
+
+	if args.Message == "" {
+		return []map[string]any{
+			{"type": "text", "text": "message is required"},
+		}
+	}
+
+	count, err := s.mesh.Broadcast(s.currentAgentID, args.Message)
+	if err != nil {
+		return []map[string]any{
+			{"type": "text", "text": fmt.Sprintf("Broadcast error: %v", err)},
+		}
+	}
+
+	return []map[string]any{
+		{"type": "text", "text": fmt.Sprintf("Broadcast sent to %d agents.", count)},
+	}
+}
+
+func onlineText(online bool) string {
+	if online {
+		return "online"
+	}
+	return "offline"
+}
+
 func (s *Server) errorResponse(id any, code int, message string) JSONRPCResponse {
 	return JSONRPCResponse{
 		JSONRPC: "2.0",
@@ -335,12 +496,11 @@ func (s *Server) errorResponse(id any, code int, message string) JSONRPCResponse
 }
 
 func generateCode() string {
-	// Simple 4-char uppercase alphanumeric code
 	const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	b := make([]byte, 4)
 	for i := range b {
 		b[i] = chars[time.Now().UnixNano()%int64(len(chars))]
-		time.Sleep(1) // ensure entropy
+		time.Sleep(1)
 	}
 	return string(b)
 }
