@@ -1,5 +1,5 @@
-# docker-compose.yml — IMAgent Relay + APK hosting
 version: "3.8"
+
 services:
   relay:
     build: .
@@ -7,10 +7,20 @@ services:
     ports:
       - "8099:8099"
     volumes:
-      - ./apk:/var/www/html
+      - ./www:/var/www/html
+      - ./uploads:/var/imagent-uploads
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8099/health"]
       interval: 30s
-      timeout: 5s
+      timeout: 3s
       retries: 3
+
+  # Optional: Tunnel for public access (Cloudflare)
+  # Uncomment below and set your CF token:
+  #
+  # tunnel:
+  #   image: cloudflare/cloudflared:latest
+  #   command: tunnel --url http://relay:8099
+  #   depends_on:
+  #     - relay

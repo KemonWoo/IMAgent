@@ -28,6 +28,7 @@ type Relay struct {
 	mcpSrv     *mcp.Server
 	state      *mcp.AppState
 	uploadsDir string
+	logs       *ringBuffer
 	mu         sync.Mutex
 }
 
@@ -35,11 +36,16 @@ type Relay struct {
 func NewRelay(uploadsDir string) *Relay {
 	state := &mcp.AppState{}
 	sessions := session.NewManager()
+	logBuf := newRingBuffer(200)
+
+	// Capture log output into ring buffer
+	log.SetOutput(logBuf)
 
 	r := &Relay{
 		sessions:   sessions,
 		state:      state,
 		uploadsDir: uploadsDir,
+		logs:       logBuf,
 	}
 	// MCP push callback sends to APK via session manager
 	r.mcpSrv = mcp.NewServer(state, func(msg []byte) error {

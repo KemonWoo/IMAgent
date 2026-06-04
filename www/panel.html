@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IMAgent Relay</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#0f0f23;color:#e0e0e0;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:20px}
+h1{font-size:24px;margin:20px 0 8px;color:#8b5cf6}
+.subtitle{color:#888;font-size:13px;margin-bottom:24px}
+.card{background:#1a1a2e;border-radius:16px;padding:24px;width:100%;max-width:420px;margin-bottom:16px}
+.card h2{font-size:16px;color:#aaa;margin-bottom:12px}
+.status-row{display:flex;align-items:center;gap:8px;margin:8px 0}
+.dot{width:10px;height:10px;border-radius:50%}
+.dot.online{background:#22c55e}
+.dot.offline{background:#ef4444}
+.code-box{background:#0f0f23;border:2px dashed #333;border-radius:12px;padding:20px;text-align:center;margin:12px 0}
+.code{font-size:36px;font-weight:700;letter-spacing:8px;color:#8b5cf6;font-family:monospace}
+#qrcode{display:flex;justify-content:center;margin:16px 0}
+#qrcode canvas,#qrcode img{border-radius:8px;background:#fff;padding:8px}
+.btn{display:inline-block;padding:10px 24px;border-radius:20px;font-size:14px;text-decoration:none;font-weight:600;margin:4px}
+.btn-primary{background:#8b5cf6;color:#fff}
+.btn-secondary{background:#333;color:#e0e0e0}
+.btn-danger{background:#ef4444;color:#fff}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.logs{background:#0f0f23;border-radius:8px;padding:12px;max-height:200px;overflow-y:auto;font-size:12px;font-family:monospace;color:#888;white-space:pre-wrap}
+.refresh{color:#8b5cf6;cursor:pointer;font-size:13px}
+</style>
+</head>
+<body>
+<h1>🤖 IMAgent Relay</h1>
+<div class="subtitle">I'm Agent. I evolve to serve.</div>
+
+<div class="card">
+  <h2>📡 状态</h2>
+  <div class="status-row"><span class="dot" id="agentDot"></span> Agent: <span id="agentStatus">检测中...</span></div>
+  <div class="status-row"><span class="dot" id="apkDot"></span> APK: <span id="apkStatus">检测中...</span></div>
+  <div class="status-row" style="margin-top:12px">
+    <span class="refresh" onclick="refresh()">🔄 刷新</span>
+  </div>
+</div>
+
+<div class="card" id="pairCard" style="display:none">
+  <h2>🔑 配对码</h2>
+  <div class="code-box"><span class="code" id="pairCode">----</span></div>
+  <div id="qrcode"></div>
+  <div style="text-align:center;color:#666;font-size:12px">在 APK 中输入此 4 位码，或扫描二维码</div>
+</div>
+
+<div class="card">
+  <h2>📱 APK 下载</h2>
+  <div style="margin:8px 0">
+    <a href="/dl/imagent-v1.apk" class="btn btn-primary">⬇️ 下载 APK</a>
+  </div>
+  <div style="color:#666;font-size:12px;margin-top:8px">约 460MB · 全离线语音+文字+文件</div>
+</div>
+
+<div class="card">
+  <h2>⚙️ 操作</h2>
+  <div class="actions">
+    <button class="btn btn-secondary" onclick="location.reload()">🔄 刷新</button>
+    <button class="btn btn-danger" onclick="resetRelay()">🔌 重置配对</button>
+  </div>
+</div>
+
+<div class="card" style="max-height:250px;overflow:hidden">
+  <h2>📋 日志 <span style="font-size:11px;color:#666;float:right" onclick="toggleLogs()" id="logToggle">展开</span></h2>
+  <div class="logs" id="logs">加载中...</div>
+</div>
+
+<script>
+const RELAY = location.origin;
+
+async function refresh(){
+  try{
+    const r = await fetch(RELAY+'/health');
+    const s = await fetch(RELAY+'/panel/status');
+    const j = await s.json();
+
+    document.getElementById('agentStatus').textContent = j.agent_connected ? '已连接' : '离线';
+    document.getElementById('agentDot').className = 'dot '+(j.agent_connected?'online':'offline');
+    document.getElementById('apkStatus').textContent = j.apk_connected ? '已连接' : '离线';
+    document.getElementById('apkDot').className = 'dot '+(j.apk_connected?'online':'offline');
+
+    if(j.pair_code){
+      document.getElementById('pairCard').style.display = '';
+      document.getElementById('pairCode').textContent = j.pair_code;
+      drawQR(RELAY+'/apk?code='+j.pair_code);
+    } else {
+      document.getElementById('pairCard').style.display = 'none';
+    }
+
+    document.getElementById('logs').textContent = j.recent_logs || '暂无日志';
+  }catch(e){
+    document.getElementById('agentStatus').textContent = '连接失败';
+    document.getElementById('logs').textContent = 'API 错误: '+e.message;
+  }
+}
+
+function drawQR(text){
+  const div = document.getElementById('qrcode');
+  div.innerHTML = '';
+  const qr = document.createElement('div');
+  // Simple QR via google chart API (zero deps)
+  const img = document.createElement('img');
+  img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data='+encodeURIComponent(text);
+  img.width = 180; img.height = 180;
+  div.appendChild(img);
+}
+
+async function resetRelay(){
+  if(!confirm('确定要重置配对吗？APK 将断开连接。')) return;
+  try{
+    await fetch(RELAY+'/panel/reset', {method:'POST'});
+    refresh();
+  }catch(e){ alert('操作失败: '+e.message); }
+}
+
+function toggleLogs(){
+  const logs = document.getElementById('logs');
+  const btn = document.getElementById('logToggle');
+  if(logs.style.maxHeight === 'none'){
+    logs.style.maxHeight = '200px';
+    btn.textContent = '展开';
+  }else{
+    logs.style.maxHeight = 'none';
+    btn.textContent = '收起';
+  }
+}
+
+refresh();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>

@@ -37,6 +37,11 @@ func main() {
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
 
+	// Web panel
+	mux.HandleFunc("/", relay.HandlePanelRoot)
+	mux.HandleFunc("/panel/status", relay.HandlePanelStatus)
+	mux.HandleFunc("/panel/reset", relay.HandlePanelReset)
+
 	// File upload
 	mux.HandleFunc("/upload", relay.HandleUpload)
 

@@ -34,12 +34,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var inputText: EditText
     private lateinit var sendBtn: Button
     private lateinit var imageBtn: ImageButton
+    private lateinit var fileBtn: Button
     private lateinit var voiceModeBtn: Button
 
     // Image picker
     private val pickImageLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
-    ) { uri: Uri? -> uri?.let { uploadImage(it) } }
+    ) { uri: Uri? -> uri?.let { uploadFile(it, isImage = true) } }
+
+    // File picker
+    private val pickFileLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? -> uri?.let { uploadFile(it, isImage = false) } }
 
     // Voice mode
     private lateinit var voiceContainer: LinearLayout
@@ -108,9 +114,14 @@ class MainActivity : AppCompatActivity() {
         subtitleAI = findViewById(R.id.subtitle_ai)
         micBtn = findViewById(R.id.mic_btn)
         textModeBtn = findViewById(R.id.text_mode_btn)
+        sendBtn = findViewById(R.id.send_btn)
+        imageBtn = findViewById(R.id.image_btn)
+        fileBtn = findViewById(R.id.file_btn)
+        voiceModeBtn = findViewById(R.id.voice_mode_btn)
 
         sendBtn.setOnClickListener { sendText() }
         imageBtn.setOnClickListener { pickImageLauncher.launch("image/*") }
+        fileBtn.setOnClickListener { pickFileLauncher.launch("*/*") }
         voiceModeBtn.setOnClickListener { setMode(true) }
         textModeBtn.setOnClickListener { setMode(false) }
         settingsBtn.setOnClickListener { showSettings() }
@@ -384,41 +395,73 @@ class MainActivity : AppCompatActivity() {
 
     // ── Image upload ──
 
-    private fun uploadImage(uri: Uri) {
+    private fun uploadFile(uri: Uri, isImage: Boolean) {
         val prefs = getSharedPreferences("imagent", MODE_PRIVATE)
         val server = prefs.getString("server", "") ?: ""
         if (server.isEmpty()) return
 
-        addBubble("📷 上传中...", true)
+        val label = if (isImage) "📷" else "📎"
+        addBubble("$label 上传中...", true)
 
         lifecycleScope.launch {
             try {
-                val bitmap = withContext(Dispatchers.IO) {
-                    val input = contentResolver.openInputStream(uri)
-                        ?: return@withContext null
-                    BitmapFactory.decodeStream(input)?.also { input.close() }
-                } ?: run {
-                    runOnUiThread { Toast.makeText(this@MainActivity, "无法读取图片", Toast.LENGTH_SHORT).show() }
-                    return@launch
+                // Get file name
+                val fileName = withContext(Dispatchers.IO) {
+                    val cursor = contentResolver.query(uri, null, null, null, null)
+                    cursor?.use {
+                        if (it.moveToFirst()) {
+                            val idx = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            if (idx >= 0) it.getString(idx) else "file.bin"
+                        } else "file.bin"
+                    } ?: "file.bin"
                 }
 
-                val compressed = withContext(Dispatchers.IO) {
-                    val (w, h) = bitmap.width to bitmap.height
-                    val ratio = 1024.0 / maxOf(w, h)
-                    val bmp = if (ratio < 1.0) {
-                        Bitmap.createScaledBitmap(bitmap, (w * ratio).toInt(), (h * ratio).toInt(), true)
-                    } else bitmap
-                    val bos = ByteArrayOutputStream()
-                    bmp.compress(Bitmap.CompressFormat.JPEG, 80, bos)
-                    bos.toByteArray()
+                // Compress only for images
+                var bitmap: Bitmap? = null
+                val uploadBytes: ByteArray
+                val mimeType: String
+
+                if (isImage) {
+                    bitmap = withContext(Dispatchers.IO) {
+                        val input = contentResolver.openInputStream(uri) ?: return@withContext null
+                        BitmapFactory.decodeStream(input)?.also { input.close() }
+                    }
+                    if (bitmap == null) {
+                        runOnUiThread { 
+                            chatMessages.removeViewAt(chatMessages.childCount - 1)
+                            Toast.makeText(this@MainActivity, "无法读取图片", Toast.LENGTH_SHORT).show()
+                        }
+                        return@launch
+                    }
+                    val imageBitmap = bitmap
+                    uploadBytes = withContext(Dispatchers.IO) {
+                        val (w, h) = imageBitmap.width to imageBitmap.height
+                        val ratio = 1024.0 / maxOf(w, h)
+                        val bmp = if (ratio < 1.0) {
+                            Bitmap.createScaledBitmap(imageBitmap, (w * ratio).toInt(), (h * ratio).toInt(), true)
+                        } else imageBitmap
+                        val bos = ByteArrayOutputStream()
+                        bmp.compress(Bitmap.CompressFormat.JPEG, 80, bos)
+                        bos.toByteArray()
+                    }
+                    mimeType = "image/jpeg"
+                } else {
+                    bitmap = null
+                    uploadBytes = withContext(Dispatchers.IO) {
+                        contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
+                    }
+                    mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
                 }
 
+                // Save to temp file
                 val tmpFile = withContext(Dispatchers.IO) {
-                    val f = File(cacheDir, "upload_${System.currentTimeMillis()}.jpg")
-                    FileOutputStream(f).use { it.write(compressed) }
+                    val ext = if (isImage) ".jpg" else fileName.substringAfterLast('.', "")
+                    val f = File(cacheDir, "upload_${System.currentTimeMillis()}$ext")
+                    FileOutputStream(f).use { it.write(uploadBytes) }
                     f
                 }
 
+                // Upload
                 val urlStr = "http://${server}/upload"
                 val boundary = "Boundary-${System.currentTimeMillis()}"
                 val conn = withContext(Dispatchers.IO) {
@@ -429,9 +472,9 @@ class MainActivity : AppCompatActivity() {
                     c.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
                     val out = DataOutputStream(c.outputStream)
                     out.writeBytes("--$boundary\r\n")
-                    out.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"${tmpFile.name}\"\r\n")
-                    out.writeBytes("Content-Type: image/jpeg\r\n\r\n")
-                    tmpFile.inputStream().use { it.copyTo(out) }
+                    out.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"$fileName\"\r\n")
+                    out.writeBytes("Content-Type: $mimeType\r\n\r\n")
+                    out.write(uploadBytes)
                     out.writeBytes("\r\n--$boundary--\r\n")
                     out.flush()
                     out.close()
@@ -455,13 +498,24 @@ class MainActivity : AppCompatActivity() {
 
                 val json = com.google.gson.JsonParser.parseString(respBody).asJsonObject
                 val dlUrl = json.get("url")?.asString ?: ""
-                val fileName = json.get("original")?.asString ?: tmpFile.name
-                val fileSize = json.get("size")?.asLong ?: compressed.size.toLong()
+                val dlName = json.get("original")?.asString ?: fileName
+                val fileSize = json.get("size")?.asLong ?: uploadBytes.size.toLong()
 
+                val showBitmap = bitmap
                 runOnUiThread {
                     chatMessages.removeViewAt(chatMessages.childCount - 1)
-                    addImageBubble(dlUrl, fileName, fileSize, bitmap, true)
-                    mcp.sendText("[图片] $fileName ($dlUrl)")
+                    if (isImage) {
+                        addImageBubble(dlUrl, dlName, fileSize, showBitmap, true)
+                    } else {
+                        val emoji = when {
+                            mimeType.startsWith("audio/") -> "🎵"
+                            mimeType.startsWith("video/") -> "🎬"
+                            mimeType == "application/pdf" -> "📄"
+                            else -> "📎"
+                        }
+                        addBubble("$emoji $dlName (${formatSize(fileSize)})\n$dlUrl", true)
+                    }
+                    mcp.sendText(if (isImage) "[图片]" else "[文件] $dlName ($dlUrl)")
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -471,6 +525,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun formatSize(size: Long): String = when {
+        size > 1_000_000 -> "%.1fMB".format(size / 1_000_000.0)
+        size > 1_000 -> "%.1fKB".format(size / 1_000.0)
+        else -> "${size}B"
     }
 
     private fun addImageBubble(url: String, name: String, size: Long, bitmap: Bitmap?, isUser: Boolean) {
