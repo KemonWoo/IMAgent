@@ -3,6 +3,8 @@
   <p align="center"><strong>AI Native Human-Agent Communication</strong></p>
 </p>
 
+> ⚠️ **Pre-release (V1 Alpha).** This project is under active development. Core voice + text works end-to-end. We're testing and stabilizing. Expect rough edges. [See V1 status →](#-v1-status)
+
 <p align="center">
   <a href="README.zh-CN.md">中文</a> |
   <a href="README.ja.md">日本語</a> |
