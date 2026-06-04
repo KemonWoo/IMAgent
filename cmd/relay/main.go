@@ -14,7 +14,8 @@ import (
 )
 
 func main() {
-	port := flag.Int("port", 8088, "HTTP/WebSocket listen port")
+	port := flag.Int("port", 8099, "HTTP/WebSocket listen port")
+	wwwDir := flag.String("www", "/var/www/html", "Static file serving directory (APK hosting)")
 	flag.Parse()
 
 	relay := transport.NewRelay()
@@ -36,8 +37,9 @@ func main() {
 	// File upload (V2 placeholder)
 	mux.HandleFunc("/upload", relay.HandleUpload)
 
-	// File download (APK hosting)
-	mux.Handle("/dl/", http.StripPrefix("/dl/", http.FileServer(http.Dir("/var/www/html"))))
+	// File download (APK hosting) — configurable directory
+	os.MkdirAll(*wwwDir, 0755)
+	mux.Handle("/dl/", http.StripPrefix("/dl/", http.FileServer(http.Dir(*wwwDir))))
 
 	addr := fmt.Sprintf(":%d", *port)
 	server := &http.Server{
@@ -58,6 +60,7 @@ func main() {
 	log.Printf("  Agent MCP endpoint: ws://0.0.0.0:%d/mcp", *port)
 	log.Printf("  APK endpoint:        ws://0.0.0.0:%d/apk", *port)
 	log.Printf("  Health check:        http://0.0.0.0:%d/health", *port)
+	log.Printf("  File hosting:        %s", *wwwDir)
 
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatalf("Server error: %v", err)

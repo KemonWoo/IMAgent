@@ -18,9 +18,9 @@
 
 ## 路径选择
 
-根据人类拥有的基础设施，选择以下三种路径之一：
+根据人类拥有的基础设施，选择以下四种路径之一：
 
-### 路径 A：人类自有服务器（推荐）
+### 路径 A：人类自有服务器（推荐给有服务器的用户）
 
 **人类需要提供：**
 - 服务器 IP 或域名
@@ -72,7 +72,93 @@ curl http://$HOST:8099/health  # → {"status":"ok"}
 2. 帮人类在该平台部署 Relay（提供平台对应的 Dockerfile 或部署配置）
 3. Relay 就绪后，APK 托管到同一平台
 
-### 路径 C：本地 Docker（无公网服务器）
+### 路径 C：内网穿透（推荐给无服务器用户）⭐
+
+**核心思路：** Relay 跑在人类自己的电脑上，通过免费内网穿透工具暴露到公网。零服务器成本，手机在任何网络都能连接。
+
+**Agent 先判断人类所在区域，自动选择最优工具：**
+
+| 区域 | 首选工具 | 为什么 |
+|------|---------|--------|
+| 🇨🇳 中国大陆 | cpolar | 国内速度最快，免费1条隧道 |
+| 🌍 海外/全球 | Cloudflare Tunnel | 无限免费，稳定，单二进制 |
+| 🌍 通用（零安装） | localhost.run | 纯 SSH，无需装任何东西 |
+| 🔧 开发者 | bore / localtunnel | 极简，一条命令 |
+
+**Agent 自动执行（以 Cloudflare Tunnel 为例）：**
+
+```bash
+# 1. 编译 + 启动 Relay（本地）
+cd imagent
+CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/imagent-relay ./cmd/relay/
+mkdir -p /tmp/imagent-apk
+cp bin/imagent-v1.apk /tmp/imagent-apk/
+# 启动 Relay（APK 托管目录指向 /tmp/imagent-apk）
+./bin/imagent-relay -port 8099 &
+# 注意：需修改 Relay 代码的文件托管路径，或用环境变量覆盖
+# 临时方案：软链接 ln -s /tmp/imagent-apk /var/www/html
+
+# 2. 安装内网穿透工具（选其一）
+# --- 方案 C1：Cloudflare Tunnel（海外首选）---
+# 下载: https://github.com/cloudflare/cloudflared/releases/latest
+cloudflared tunnel --url http://localhost:8099
+# 输出示例: https://example-try-cloudflare.com → localhost:8099
+
+# --- 方案 C2：localhost.run（零安装，SSH 即用）---
+ssh -R 80:localhost:8099 nokey@localhost.run
+# 输出: https://xxxx.lhr.life → localhost:8099
+
+# --- 方案 C3：bore（Rust 二进制）---
+# 下载: https://github.com/ekzhang/bore/releases
+bore local 8099 --to bore.pub
+# 输出: bore.pub:xxxxx → localhost:8099
+
+# --- 方案 C4：localtunnel（Node.js 环境）---
+npx localtunnel --port 8099
+# 输出: https://xxxx.loca.lt → localhost:8099
+
+# --- 方案 C5：cpolar（🇨🇳 国内首选）---
+# 下载: https://www.cpolar.com/download
+cpolar http 8099
+# 输出: https://xxxx.cpolar.cn → localhost:8099
+
+# 3. Agent 获取穿透后的公网地址
+# 从工具输出中提取 URL → 记为 $TUNNEL_URL
+# APK 下载地址: $TUNNEL_URL/dl/imagent-v1.apk
+# MCP 连接地址: 将 https:// 替换为 wss://  → wss://xxxx/mcp
+```
+
+**Agent 对话示例（用户在中国）：**
+```
+Agent: 检测到你在国内。我用 cpolar 做内网穿透，免费且速度快。
+       你的 Relay 会跑在本机，公网地址由 cpolar 提供。
+       手机即使不在同一网络也能连接。
+
+       开始部署？(需要你先在 cpolar.com 注册一个免费账号)
+```
+
+**Agent 对话示例（用户在海外）：**
+```
+Agent: 我推荐 Cloudflare Tunnel，免费、稳定、无需注册。
+       一条命令就能把本机 8099 端口暴露到公网。
+
+       开始部署？
+```
+
+**穿透工具对比：**
+
+| 工具 | 安装 | 需要注册 | 速度 | 域名 |
+|------|:--:|:--:|:--:|------|
+| Cloudflare Tunnel | 下载二进制 | ❌ | ⭐⭐⭐⭐ | 随机子域名 |
+| localhost.run | 无需安装(SSH) | ❌ | ⭐⭐⭐ | 随机子域名 |
+| bore | 下载二进制 | ❌ | ⭐⭐⭐ | bore.pub:端口 |
+| localtunnel | npm | ❌ | ⭐⭐ | 随机子域名 |
+| cpolar | 下载二进制 | ✅(免费注册) | ⭐⭐⭐⭐⭐ | 随机子域名 |
+| ngrok | 下载二进制 | ✅(免费注册) | ⭐⭐⭐⭐ | 随机子域名 |
+
+> **Agent 注意：** 穿透工具提供的 URL 是临时的（重启会变）。每次启动 Relay 后，Agent 需重新获取最新公网地址，更新 APK 中的 Relay 连接地址，或使用二维码动态注入。
+
+### 路径 D：本地 Docker / 局域网
 
 **人类需要：** 安装了 Docker 的机器
 
