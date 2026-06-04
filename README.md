@@ -1,7 +1,13 @@
 # IMAgent — AI Native 人机沟通方案
 
-> **人类一句话部署：** 告诉你的 Agent：
-> *"去 https://github.com/KemonWoo/IMAgent 读 AGENTS.md 并按指示部署"*
+<p align="center">
+  <a href="https://github.com/KemonWoo/IMAgent"><img src="https://img.shields.io/badge/GitHub-海外版-blue?style=for-the-badge&logo=github"></a>
+  <a href="https://gitee.com/kemonwoo/IMAgent"><img src="https://img.shields.io/badge/Gitee-国内版-red?style=for-the-badge&logo=gitee"></a>
+  <a href="README.zh-CN.md">中文完整版 →</a>
+</p>
+
+> **一句话部署：** 告诉你的 Agent：
+> *"去 GitHub/KemonWoo/IMAgent 读 AGENTS.md 并按指示部署"* （国内用 Gitee）
 >
 > Agent 自动：选穿透工具 → 编译 → 启动 → 生成二维码 → 人类扫码即用。
 

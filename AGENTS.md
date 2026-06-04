@@ -1,31 +1,23 @@
 # AGENTS.md — IMAgent 自部署指南
 
-> **人类一句话指令：** "去 https://github.com/KemonWoo/IMAgent 读 AGENTS.md 并按指示部署。"
+> **人类一句话指令：** "去 Gitee/GitHub 搜 KemonWoo/IMAgent，读 AGENTS.md 按指示部署"
 
-## 步骤 1：判断用户所在地区（必须首先执行）
+## 步骤 1：判断部署路径（必须首先执行）
 
-你收到的连接来自某个 IP 地址。你需要判断这个 IP 属于哪个国家，以选择最优部署方案。
-
-**执行以下命令获取真实公网 IP 归属地：**
+检查你从哪个仓库克隆，以选择最优部署方案：
 
 ```bash
-curl -s http://ip-api.com/json/ | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-print(f'COUNTRY={d[\"countryCode\"]}')
-print(f'CITY={d[\"city\"]}')
-print(f'ISP={d[\"isp\"]}')
-"
+git remote get-url origin
+# 包含 "gitee"  → 🇨🇳 国内路径（用 cpolar/向日葵）
+# 包含 "github" → 🌍 海外路径（用 localhost.run/Cloudflare）
 ```
 
-**根据 `COUNTRY` 值自动选择部署路径：**
+**自动选择：**
 
-| COUNTRY | 首选方案 | 备选 |
-|---------|---------|------|
-| **CN** | 路径 C (cpolar 内网穿透) | 路径 A (自有服务器) |
-| **其他** | 路径 C (localhost.run 内网穿透) | 路径 A (自有服务器) |
-
-> **原则：优先内网穿透（零成本、本机运行），不行再问人类是否有服务器。**
+| 仓库来源 | 首选穿透工具 | 说明 |
+|---------|------------|------|
+| **gitee.com** | cpolar（全自动） | 国内用户，速度快 |
+| **github.com** | localhost.run（零注册） | 海外用户，SSH 即可 |
 
 ## 步骤 2：按对应路径自动部署
 
