@@ -134,6 +134,21 @@ func NewServer(state *AppState, push PushFunc) *Server {
 				},
 			},
 			{
+				Name:        "voice_file",
+				Description: "Send a file notification to the phone APK. The file should already be uploaded via HTTP POST /upload. Provide the download URL, filename, size, and MIME type.",
+				InputSchema: InputSchema{
+					Type: "object",
+					Properties: map[string]Property{
+						"url":      {Type: "string", Description: "Download URL of the file (e.g. /dl/filename.png)"},
+						"name":     {Type: "string", Description: "Original filename"},
+						"size":     {Type: "integer", Description: "File size in bytes"},
+						"mime":     {Type: "string", Description: "MIME type (e.g. image/png)"},
+						"type":     {Type: "string", Description: "File category: image, audio, video, document, file"},
+					},
+					Required: []string{"url", "name", "size", "mime", "type"},
+				},
+			},
+			{
 				Name:        "voice_reset",
 				Description: "Disconnect the current phone APK pairing and generate a new code.",
 				InputSchema: InputSchema{Type: "object", Properties: map[string]Property{}},
@@ -253,6 +268,35 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) JSONRPCResponse {
 		}
 		resultContent = []map[string]any{
 			{"type": "text", "text": "Sent to phone."},
+		}
+
+	case "voice_file":
+		var args struct {
+			URL  string `json:"url"`
+			Name string `json:"name"`
+			Size int64  `json:"size"`
+			Mime string `json:"mime"`
+			Type string `json:"type"`
+		}
+		json.Unmarshal(params.Arguments, &args)
+		if args.URL == "" || args.Name == "" {
+			return s.errorResponse(req.ID, -32602, "url and name are required")
+		}
+		msg, _ := json.Marshal(map[string]any{
+			"type": "file",
+			"file": map[string]any{
+				"url":  args.URL,
+				"name": args.Name,
+				"size": args.Size,
+				"mime": args.Mime,
+				"type": args.Type,
+			},
+		})
+		if s.push != nil {
+			s.push(msg)
+		}
+		resultContent = []map[string]any{
+			{"type": "text", "text": "File notification sent to phone."},
 		}
 
 	case "voice_reset":

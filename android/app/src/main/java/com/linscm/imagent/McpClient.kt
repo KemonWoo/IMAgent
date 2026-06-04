@@ -61,7 +61,7 @@ class McpClient(
                                 handler.post { onStatus(Status.ERROR) }
                                 Log.w(TAG, "Code mismatch")
                             }
-                            "chat_response", "tts" -> {
+                            "chat_response", "tts", "file" -> {
                                 val content = json.get("content")?.asString ?: ""
                                 handler.post { onMessage(type, json) }
                             }

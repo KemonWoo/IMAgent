@@ -247,6 +247,30 @@ class MainActivity : AppCompatActivity() {
                         connected = false
                         updateStatus(McpClient.Status.DISCONNECTED)
                     }
+                    "file" -> {
+                        val file = json.getAsJsonObject("file") ?: return@McpClient
+                        val name = file.get("name")?.asString ?: "unknown"
+                        val url = file.get("url")?.asString ?: ""
+                        val size = file.get("size")?.asLong ?: 0
+                        val mime = file.get("mime")?.asString ?: ""
+                        val ftype = file.get("type")?.asString ?: "file"
+                        runOnUiThread {
+                            val sizeStr = when {
+                                size > 1_000_000 -> "%.1fMB".format(size / 1_000_000.0)
+                                size > 1_000 -> "%.1fKB".format(size / 1_000.0)
+                                else -> "${size}B"
+                            }
+                            val emoji = when (ftype) {
+                                "image" -> "🖼️"
+                                "audio" -> "🎵"
+                                "video" -> "🎬"
+                                "document" -> "📄"
+                                else -> "📎"
+                            }
+                            val fileMsg = "$emoji $name ($sizeStr)\n$url"
+                            addBubble(fileMsg, false)
+                        }
+                    }
                 }
             },
             onStatus = { s -> runOnUiThread { updateStatus(s) } }

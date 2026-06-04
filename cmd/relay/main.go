@@ -1,4 +1,4 @@
-// IMAgent Relay — MCP server for Agent-to-APK voice and text communication.
+// IMAgent Relay — MCP server for Agent-to-APK voice, text, and file communication.
 package main
 
 import (
@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/KemonWoo/IMAgent/internal/transport"
@@ -16,9 +18,10 @@ import (
 func main() {
 	port := flag.Int("port", 8099, "HTTP/WebSocket listen port")
 	wwwDir := flag.String("www", "/var/www/html", "Static file serving directory (APK hosting)")
+	uploadsDir := flag.String("uploads", filepath.Join(os.TempDir(), "imagent-uploads"), "File upload storage directory")
 	flag.Parse()
 
-	relay := transport.NewRelay()
+	relay := transport.NewRelay(*uploadsDir)
 
 	mux := http.NewServeMux()
 
@@ -34,12 +37,31 @@ func main() {
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
 
-	// File upload (V2 placeholder)
+	// File upload
 	mux.HandleFunc("/upload", relay.HandleUpload)
 
-	// File download (APK hosting) — configurable directory
+	// File download — merges wwwDir and uploadsDir
 	os.MkdirAll(*wwwDir, 0755)
-	mux.Handle("/dl/", http.StripPrefix("/dl/", http.FileServer(http.Dir(*wwwDir))))
+	os.MkdirAll(*uploadsDir, 0755)
+	mux.HandleFunc("/dl/", func(w http.ResponseWriter, r *http.Request) {
+		// Try wwwDir first, then uploadsDir
+		path := strings.TrimPrefix(r.URL.Path, "/dl/")
+		if path == "" {
+			http.NotFound(w, r)
+			return
+		}
+		fullPath := filepath.Join(*wwwDir, path)
+		if _, err := os.Stat(fullPath); err == nil {
+			http.ServeFile(w, r, fullPath)
+			return
+		}
+		fullPath = filepath.Join(*uploadsDir, path)
+		if _, err := os.Stat(fullPath); err == nil {
+			http.ServeFile(w, r, fullPath)
+			return
+		}
+		http.NotFound(w, r)
+	})
 
 	addr := fmt.Sprintf(":%d", *port)
 	server := &http.Server{
@@ -61,6 +83,7 @@ func main() {
 	log.Printf("  APK endpoint:        ws://0.0.0.0:%d/apk", *port)
 	log.Printf("  Health check:        http://0.0.0.0:%d/health", *port)
 	log.Printf("  File hosting:        %s", *wwwDir)
+	log.Printf("  Upload storage:      %s", *uploadsDir)
 
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatalf("Server error: %v", err)
