@@ -390,7 +390,7 @@ class MainActivity : AppCompatActivity() {
             McpClient.Status.CONNECTED -> {
                 connected = true
                 statusDot.setBackgroundResource(R.drawable.status_dot_online)
-                statusText.text = "● 在线"
+                statusText.text = "在线"
             }
             McpClient.Status.CONNECTING -> {
                 statusDot.setBackgroundResource(R.drawable.status_dot_connecting)
@@ -452,12 +452,21 @@ class MainActivity : AppCompatActivity() {
     private fun addBubble(text: String, isUser: Boolean) {
         val bubble = TextView(this).apply {
             setText(text)
-            setTextColor(0xFFE0E0E0.toInt())
             setPadding(24, 14, 24, 14)
             textSize = 15f
-            background = GradientDrawable().apply {
-                setColor(if (isUser) 0xFF1E1E3A.toInt() else 0xFF25254A.toInt())
-                cornerRadius = 40f
+            if (isUser) {
+                setTextColor(0xFFFFFFFF.toInt())
+                background = GradientDrawable().apply {
+                    setColor(0xFF7C5CFC.toInt())
+                    cornerRadius = 48f
+                }
+            } else {
+                setTextColor(0xFFCBD5E1.toInt())
+                background = GradientDrawable().apply {
+                    setColor(0xFF1A1A2E.toInt())
+                    setStroke(1, 0xFF25254A.toInt())
+                    cornerRadius = 48f
+                }
             }
         }
         val params = LinearLayout.LayoutParams(
@@ -619,7 +628,12 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             setPadding(8, 8, 8, 8)
             background = GradientDrawable().apply {
-                setColor(if (isUser) 0xFF1E1E3A.toInt() else 0xFF25254A.toInt())
+                if (isUser) {
+                    setColor(0xFF7C5CFC.toInt())
+                } else {
+                    setColor(0xFF1A1A2E.toInt())
+                    setStroke(1, 0xFF25254A.toInt())
+                }
                 cornerRadius = 24f
             }
         }
