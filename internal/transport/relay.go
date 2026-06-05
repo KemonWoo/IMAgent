@@ -458,11 +458,6 @@ func (r *Relay) HandleAPKWS(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if !r.sessions.HasAgent() {
-		wsjson.Write(ctx, conn, map[string]string{"status": "no_agent", "message": "Agent not connected yet."})
-		return
-	}
-
 	if !r.sessions.VerifyCode(hs.Code) {
 		wsjson.Write(ctx, conn, map[string]string{"status": "code_mismatch"})
 		return
