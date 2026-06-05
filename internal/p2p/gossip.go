@@ -1,4 +1,5 @@
 // Package p2p — gossip protocol for peer discovery and agent sync.
+// V4: adaptive reconnection with exponential backoff and circuit breaker.
 package p2p
 
 import (
@@ -7,14 +8,18 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
+	"sync"
 	"time"
+
+	"github.com/KemonWoo/IMAgent/internal/metrics"
 )
 
 // Gossiper handles peer discovery and agent synchronization across the mesh.
 type Gossiper struct {
 	nodeID      NodeID
-	address     string        // our own "host:port"
+	address     string
 	peers       *PeerStore
 	routing     *RoutingTable
 	client      *http.Client
@@ -22,6 +27,11 @@ type Gossiper struct {
 	pruneEvery  time.Duration
 	maxPeerAge  time.Duration
 	stopCh      chan struct{}
+
+	// V4: adaptive reconnection
+	backoffs  map[NodeID]*metrics.Backoff
+	breakers  map[NodeID]*metrics.CircuitBreaker
+	bkMu      sync.Mutex
 }
 
 // NewGossiper creates a new gossiper for this relay node.
@@ -36,10 +46,34 @@ func NewGossiper(nodeID NodeID, address string, peers *PeerStore, routing *Routi
 		pruneEvery:  120 * time.Second,
 		maxPeerAge:  300 * time.Second,
 		stopCh:      make(chan struct{}),
+		backoffs:    make(map[NodeID]*metrics.Backoff),
+		breakers:    make(map[NodeID]*metrics.CircuitBreaker),
 	}
 }
 
-// Start begins periodic gossip and pruning.
+func (g *Gossiper) getBackoff(id NodeID) *metrics.Backoff {
+	g.bkMu.Lock()
+	defer g.bkMu.Unlock()
+	if b, ok := g.backoffs[id]; ok {
+		return b
+	}
+	b := metrics.NewBackoff()
+	g.backoffs[id] = b
+	return b
+}
+
+func (g *Gossiper) getBreaker(id NodeID) *metrics.CircuitBreaker {
+	g.bkMu.Lock()
+	defer g.bkMu.Unlock()
+	if b, ok := g.breakers[id]; ok {
+		return b
+	}
+	b := metrics.NewCircuitBreaker(5, 300*time.Second) // 5 failures → 5min open
+	g.breakers[id] = b
+	return b
+}
+
+// Start begins periodic gossip and pruning with jitter.
 func (g *Gossiper) Start() {
 	go g.gossipLoop()
 	go g.pruneLoop()
@@ -50,13 +84,49 @@ func (g *Gossiper) Stop() {
 	close(g.stopCh)
 }
 
-// Bootstrap connects to a list of initial peers.
+// Bootstrap connects to a list of initial peers with adaptive retry.
 func (g *Gossiper) Bootstrap(bootstrapAddrs []string) {
 	for _, addr := range bootstrapAddrs {
 		if addr == g.address {
 			continue
 		}
-		go g.announce(addr)
+		go g.bootstrapPeer(addr)
+	}
+}
+
+func (g *Gossiper) bootstrapPeer(addr string) {
+	id := NodeID(addr) // temporary ID based on address
+	bo := g.getBackoff(id)
+	cb := g.getBreaker(id)
+
+	for {
+		select {
+		case <-g.stopCh:
+			return
+		default:
+		}
+
+		if !cb.Allow() {
+			log.Printf("P2P bootstrap %s: circuit open, waiting %v", addr, cb.ResetAfter())
+			time.Sleep(cb.ResetAfter())
+			continue
+		}
+
+		if err := g.announce(addr); err != nil {
+			log.Printf("P2P bootstrap %s failed (attempt %d): %v", addr, bo.Attempts()+1, err)
+			cb.RecordFailure()
+			d := bo.Next()
+			log.Printf("P2P bootstrap %s: retry in %v", addr, d)
+			time.Sleep(d)
+			continue
+		}
+
+		// Success
+		bo.Reset()
+		cb.RecordSuccess()
+		log.Printf("P2P bootstrap %s: connected", addr)
+		// Peer is now known by its real ID — stop bootstrap retry
+		return
 	}
 }
 
@@ -96,7 +166,8 @@ func (g *Gossiper) pruneLoop() {
 }
 
 // announce tells a remote relay about us and learns about its peers.
-func (g *Gossiper) announce(remoteAddr string) {
+// Returns error for callers to handle retry logic.
+func (g *Gossiper) announce(remoteAddr string) error {
 	body, _ := json.Marshal(map[string]string{
 		"id":      string(g.nodeID),
 		"address": g.address,
@@ -107,47 +178,49 @@ func (g *Gossiper) announce(remoteAddr string) {
 		bytes.NewReader(body),
 	)
 	if err != nil {
-		log.Printf("P2P announce to %s: %v", remoteAddr, err)
-		return
+		return fmt.Errorf("announce POST: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("P2P announce to %s: status %d", remoteAddr, resp.StatusCode)
-		return
+		return fmt.Errorf("announce status %d", resp.StatusCode)
 	}
 
-	// Parse returned peer list
 	var result struct {
 		Peers []*PeerInfo `json:"peers"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		log.Printf("P2P announce parse from %s: %v", remoteAddr, err)
-		return
+		return fmt.Errorf("announce parse: %w", err)
 	}
 
-	// Learn about remote's peers
 	for _, p := range result.Peers {
 		if p.ID == g.nodeID {
 			continue
 		}
 		g.peers.Set(p)
-		// Update routing table
 		for _, a := range p.Agents {
 			g.routing.Set(a.ID, p.ID)
 		}
 	}
+	return nil
 }
 
 // exchangePeers fetches the peer list from a remote relay.
 func (g *Gossiper) exchangePeers(remoteAddr string) {
+	cb := g.getBreaker(NodeID(remoteAddr))
+	if !cb.Allow() {
+		return
+	}
+
 	resp, err := g.client.Get(fmt.Sprintf("http://%s/p2p/peers", remoteAddr))
 	if err != nil {
+		cb.RecordFailure()
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		cb.RecordFailure()
 		return
 	}
 
@@ -155,8 +228,11 @@ func (g *Gossiper) exchangePeers(remoteAddr string) {
 		Peers []*PeerInfo `json:"peers"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		cb.RecordFailure()
 		return
 	}
+
+	cb.RecordSuccess()
 
 	for _, p := range result.Peers {
 		if p.ID == g.nodeID {
@@ -186,6 +262,12 @@ func (g *Gossiper) pushAgents(remoteAddr string, agents []AgentRef) {
 	resp.Body.Close()
 }
 
+// jitterDuration adds ±20% jitter to a duration.
+func jitterDuration(d time.Duration) time.Duration {
+	j := time.Duration(float64(d) * 0.2 * (rand.Float64()*2 - 1))
+	return d + j
+}
+
 // ---------- HTTP handlers ----------
 
 // HandleAnnounce handles POST /p2p/announce — another relay announces itself.
@@ -209,7 +291,6 @@ func (g *Gossiper) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Register the new peer
 	peerID := NodeID(req.ID)
 	g.peers.Set(&PeerInfo{
 		ID:      peerID,
@@ -218,13 +299,11 @@ func (g *Gossiper) HandleAnnounce(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("P2P: new peer %s at %s", req.ID, req.Address)
 
-	// Return our peer list so they can learn about others
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"peers": g.peers.List(),
 	})
 
-	// Also connect back to the announcer to learn their peers
 	go g.exchangePeers(req.Address)
 }
 
@@ -238,9 +317,8 @@ func (g *Gossiper) HandlePeers(w http.ResponseWriter, r *http.Request) {
 
 // HandleAgents handles GET /p2p/agents — return all known agents across mesh.
 func (g *Gossiper) HandleAgents(w http.ResponseWriter, r *http.Request) {
-	localAgents := g.routing.List() // gets from routing table (which mirrors our local too)
+	localAgents := g.routing.List()
 
-	// Build full agent list
 	type agentEntry struct {
 		ID     string `json:"id"`
 		Name   string `json:"name"`
@@ -249,17 +327,14 @@ func (g *Gossiper) HandleAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	agents := make([]agentEntry, 0)
 
-	// Include our own local agents
 	for agentID, nodeID := range localAgents {
 		agents = append(agents, agentEntry{
 			ID:     agentID,
-			// Name is set by whoever registered the agent
 			NodeID: string(nodeID),
 			Online: true,
 		})
 	}
 
-	// Include agents from known peers
 	for _, peer := range g.peers.List() {
 		for _, a := range peer.Agents {
 			agents = append(agents, agentEntry{

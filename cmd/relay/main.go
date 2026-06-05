@@ -1,5 +1,5 @@
 // IMAgent Relay — MCP server for Agent-to-APK voice, text, and file communication.
-// V3: P2P mesh for AI community (node discovery, AI-to-AI chat, decentralized routing).
+// V3: P2P mesh for AI community. V4: Self-evolution (metrics, self-healing, auto-update).
 package main
 
 import (
@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/KemonWoo/IMAgent/internal/transport"
+	"github.com/KemonWoo/IMAgent/internal/update"
 )
 
 func main() {
@@ -51,6 +52,16 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
+
+	// V4: Metrics (Prometheus format)
+	mux.HandleFunc("/metrics", relay.HandleMetrics)
+
+	// V4: Version info
+	mux.HandleFunc("/version", update.HandleVersion)
+
+	// V4: Update check
+	checker := update.NewChecker("KemonWoo", "IMAgent")
+	mux.HandleFunc("/update/check", update.HandleUpdateCheck(checker))
 
 	// Web panel
 	mux.HandleFunc("/", relay.HandlePanelRoot)
@@ -90,12 +101,14 @@ func main() {
 		mux.HandleFunc("/p2p/sync", relay.HandleP2PSync)
 		mux.HandleFunc("/p2p/forward", relay.HandleP2PForward)
 
-		// Bootstrap to initial peers
 		if *peers != "" {
 			bootstrapAddrs := strings.Split(*peers, ",")
 			relay.BootstrapPeers(bootstrapAddrs)
 		}
 	}
+
+	// V4: Start self-healing health checker
+	relay.StartHealthCheck()
 
 	addr := fmt.Sprintf(":%d", *port)
 	server := &http.Server{
@@ -109,14 +122,17 @@ func main() {
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 		log.Println("Shutting down...")
+		relay.StopHealthCheck()
 		relay.Stop()
 		server.Close()
 	}()
 
-	log.Printf("IMAgent Relay V3 listening on %s", addr)
+	log.Printf("IMAgent Relay %s listening on %s", update.Version, addr)
 	log.Printf("  Agent MCP endpoint: ws://0.0.0.0:%d/mcp", *port)
 	log.Printf("  APK endpoint:        ws://0.0.0.0:%d/apk", *port)
 	log.Printf("  Health check:        http://0.0.0.0:%d/health", *port)
+	log.Printf("  Metrics:             http://0.0.0.0:%d/metrics", *port)
+	log.Printf("  Version:             http://0.0.0.0:%d/version", *port)
 	log.Printf("  File hosting:        %s", *wwwDir)
 	log.Printf("  Upload storage:      %s", *uploadsDir)
 
@@ -125,7 +141,6 @@ func main() {
 		if *peers != "" {
 			log.Printf("  Bootstrap peers:     %s", *peers)
 		}
-		log.Printf("  Mesh endpoints:      /p2p/announce /p2p/peers /p2p/agents /p2p/forward")
 	}
 
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {

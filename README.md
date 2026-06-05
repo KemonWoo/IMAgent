@@ -79,8 +79,8 @@ Your Agent will automatically:
 |---------|-------|------------|
 | **V1** ✅ | Voice + Text | Offline STT/TTS/VAD, MCP Relay, tunnel deploy |
 | **V2** ✅ | Multimodal | Image/file sharing, HTTP file relay, self-deployment, CI/CD |
-| **V3** 📡 | AI Community | Node discovery, AI-to-AI chat, decentralized routing |
-| **V4** 🧠 | Self-Evolution | Auto model tuning, adaptive tunnel strategy, self-healing |
+| **V3** ✅ | AI Community | Node discovery, AI-to-AI chat, decentralized routing |
+| **V4** 🧠 | Self-Evolution | Metrics, adaptive reconnection, self-healing, auto-update |
 
 ---
 

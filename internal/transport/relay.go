@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"nhooyr.io/websocket/wsjson"
 
 	"github.com/KemonWoo/IMAgent/internal/mcp"
+	"github.com/KemonWoo/IMAgent/internal/metrics"
 	"github.com/KemonWoo/IMAgent/internal/p2p"
 	"github.com/KemonWoo/IMAgent/internal/session"
 )
@@ -40,6 +42,13 @@ type Relay struct {
 	peers     *p2p.PeerStore
 	gossiper  *p2p.Gossiper
 	forwarder *p2p.Forwarder
+
+	// V4: Self-evolution
+	metricsReg  *metrics.Registry
+	healthStop  chan struct{}
+	msgCounter  *metrics.Counter
+	errCounter  *metrics.Counter
+	connGauge   *metrics.Gauge
 }
 
 // NewRelay creates a new relay instance.
@@ -60,7 +69,13 @@ func NewRelay(uploadsDir, p2pNodeID, p2pAddress string) *Relay {
 		address:    p2pAddress,
 		routing:    p2p.NewRoutingTable(),
 		peers:      p2p.NewPeerStore(),
+		// V4: metrics
+		metricsReg: metrics.NewRegistry(),
+		healthStop: make(chan struct{}),
 	}
+	r.msgCounter = r.metricsReg.Counter("relay_messages_total", "Total messages processed")
+	r.errCounter  = r.metricsReg.Counter("relay_errors_total", "Total errors encountered")
+	r.connGauge   = r.metricsReg.Gauge("relay_connections", "Current active connections")
 
 	// MCP push callback: agent → APK
 	r.mcpSrv = mcp.NewServer(state, func(msg []byte) error {
@@ -110,6 +125,83 @@ func (r *Relay) BootstrapPeers(addrs []string) {
 func (r *Relay) Stop() {
 	if r.gossiper != nil {
 		r.gossiper.Stop()
+	}
+}
+
+// ---------- V4: Self-Evolution methods ----------
+
+// HandleMetrics serves the Prometheus-compatible /metrics endpoint.
+func (r *Relay) HandleMetrics(w http.ResponseWriter, req *http.Request) {
+	// Update connection gauge
+	agentCount := r.sessions.AgentCount()
+	if r.sessions.HasAPK() {
+		agentCount++
+	}
+	r.connGauge.Set(int64(agentCount))
+	r.metricsReg.HandleMetrics(w, req)
+}
+
+// StartHealthCheck runs a periodic self-healing goroutine.
+func (r *Relay) StartHealthCheck() {
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-r.healthStop:
+				return
+			case <-ticker.C:
+				r.runHealthCheck()
+			}
+		}
+	}()
+	log.Println("V4 self-healing health checker started")
+}
+
+// StopHealthCheck stops the health checker.
+func (r *Relay) StopHealthCheck() {
+	close(r.healthStop)
+}
+
+func (r *Relay) runHealthCheck() {
+	// Memory pressure check
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	memMB := m.Alloc / 1024 / 1024
+
+	if memMB > 500 {
+		log.Printf("⚠ Memory pressure: %dMB allocated, forcing GC", memMB)
+		runtime.GC()
+		runtime.ReadMemStats(&m)
+		log.Printf("  After GC: %dMB allocated", m.Alloc/1024/1024)
+	}
+
+	// Connection health: log current state
+	agents := r.sessions.AgentCount()
+	hasAPK := r.sessions.HasAPK()
+	peerCount := len(r.peers.List())
+
+	if agents+peerCount == 0 && !hasAPK {
+		// Idle is fine — relay waits for connections
+		return
+	}
+
+	log.Printf("Health: agents=%d apk=%v peers=%d mem=%dMB goroutines=%d",
+		agents, hasAPK, peerCount, memMB, runtime.NumGoroutine())
+}
+
+// RecordMessage increments the message counter.
+func (r *Relay) RecordMessage() {
+	if r.msgCounter != nil {
+		r.msgCounter.Inc()
+	}
+}
+
+// RecordError increments the error counter.
+func (r *Relay) RecordError() {
+	if r.errCounter != nil {
+		r.errCounter.Inc()
 	}
 }
 
