@@ -88,6 +88,9 @@ func (s *AppState) GetState() (nexusID string, code string, apkConnected bool, l
 // Callback for pushing messages to APK.
 type PushFunc func(msg []byte) error
 
+// OnVoiceConnect is called after voice_connect succeeds. Returns QR-related info.
+type OnVoiceConnect func(agentID, code string) (qrURL, relayAddr string)
+
 // MeshCallbacks provides the MCP server access to the P2P mesh.
 type MeshCallbacks struct {
 	// ListAgents returns all known agents across the mesh.
@@ -108,16 +111,28 @@ type AgentInfo struct {
 
 // Server handles MCP protocol messages.
 type Server struct {
-	state           *AppState
-	push            PushFunc
-	mesh            *MeshCallbacks
-	currentAgentID  string // set before each Handle call
-	tools           []Tool
+	state          *AppState
+	push           PushFunc
+	mesh           *MeshCallbacks
+	currentAgentID string // set before each Handle call
+	tools          []Tool
+	publicAddr     string // relay public address for QR generation
+	onVoiceConnect OnVoiceConnect
 }
 
 // SetAgentID sets the current agent ID for this request context.
 func (s *Server) SetAgentID(id string) {
 	s.currentAgentID = id
+}
+
+// SetPublicAddr sets the relay's public address for QR pairing.
+func (s *Server) SetPublicAddr(addr string) {
+	s.publicAddr = addr
+}
+
+// SetOnVoiceConnect sets the callback for post-voice_connect QR generation.
+func (s *Server) SetOnVoiceConnect(cb OnVoiceConnect) {
+	s.onVoiceConnect = cb
 }
 
 // NewServer creates a new MCP server.
@@ -276,8 +291,22 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) JSONRPCResponse {
 			id = fmt.Sprintf("agent-%d", time.Now().UnixMilli())
 		}
 		s.state.SetNexus(id, code)
+
+		msg := fmt.Sprintf("Pairing code: %s\nNexus ID: %s", code, id)
+
+		// Generate QR if callback is set
+		if s.onVoiceConnect != nil {
+			qrURL, _ := s.onVoiceConnect(id, code)
+			if qrURL != "" {
+				msg += fmt.Sprintf("\nQR code: %s", qrURL)
+				msg += fmt.Sprintf("\nimagent://pair?r=%s&c=%s", s.publicAddr, code)
+			}
+		}
+
+		msg += "\n\nShare this code (or QR) with the human. They scan or enter it on the phone APK."
+
 		resultContent = []map[string]any{
-			{"type": "text", "text": fmt.Sprintf("Pairing code: %s\nNexus ID: %s\nShare this code with the human. They enter it on the phone APK.", code, id)},
+			{"type": "text", "text": msg},
 		}
 
 	case "voice_status":

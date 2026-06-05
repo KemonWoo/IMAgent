@@ -35,6 +35,9 @@ func main() {
 	tlsKey := flag.String("tls-key", "", "TLS private key file (PEM). Required with --tls-cert.")
 	autoCert := flag.String("auto-cert", "", "Auto-generate self-signed cert+key to this directory. Prompts user to trust on first connect.")
 
+	// Relay public address (for QR code generation)
+	publicAddr := flag.String("public-addr", "", "Public address for QR pairing (host:port). Auto-detected if empty.")
+
 	// V3: P2P mesh
 	p2pNodeID := flag.String("p2p-id", "", "Unique node ID for this relay in the mesh (auto-generated if empty)")
 	p2pAddr := flag.String("p2p-addr", "", "Public address for this relay (host:port) for mesh communication")
@@ -51,6 +54,9 @@ func main() {
 	}
 
 	relay := transport.NewRelay(*uploadsDir, p2pNode, p2pAddress)
+	if *publicAddr != "" {
+		relay.SetPublicAddr(*publicAddr)
+	}
 
 	mux := http.NewServeMux()
 
@@ -59,6 +65,9 @@ func main() {
 
 	// APK endpoint (WebSocket)
 	mux.HandleFunc("/apk", relay.HandleAPKWS)
+
+	// QR code image endpoint
+	mux.HandleFunc("/qr/", relay.HandleQR)
 
 	// Health check
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

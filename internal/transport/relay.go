@@ -43,6 +43,7 @@ type Relay struct {
 	gossiper  *p2p.Gossiper
 	forwarder *p2p.Forwarder
 	useTLS    bool   // V2: whether P2P calls should use HTTPS
+	publicAddr string // V1: public address for QR pairing code
 
 	// V4: Self-evolution
 	metricsReg  *metrics.Registry
@@ -81,6 +82,17 @@ func NewRelay(uploadsDir, p2pNodeID, p2pAddress string) *Relay {
 	// MCP push callback: agent → APK
 	r.mcpSrv = mcp.NewServer(state, func(msg []byte) error {
 		return r.sessions.RouteFromAgent(msg)
+	})
+	// QR code generation callback
+	r.mcpSrv.SetOnVoiceConnect(func(agentID, code string) (string, string) {
+		addr := r.GetPublicAddr()
+		qrPath := r.StoreQR(code)
+		scheme := "http"
+		if r.useTLS {
+			scheme = "https"
+		}
+		qrURL := fmt.Sprintf("%s://%s%s", scheme, addr, qrPath)
+		return qrURL, addr
 	})
 
 	// V3: Wire P2P callbacks into MCP server

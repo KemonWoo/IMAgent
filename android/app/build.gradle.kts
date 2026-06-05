@@ -35,6 +35,10 @@ dependencies {
     // sherpa-onnx v1.13.2 — on-device STT + TTS + VAD (local AAR)
     implementation(files("libs/sherpa-onnx-1.13.2.aar"))
 
+    // ZXing — QR code scanning
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+
     // AndroidX core
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")

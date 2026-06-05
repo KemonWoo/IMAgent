@@ -1,6 +1,7 @@
 package com.linscm.imagent
 
 import android.app.AlertDialog
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.drawable.GradientDrawable
@@ -14,6 +15,7 @@ import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.google.zxing.integration.android.IntentIntegrator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -46,6 +48,18 @@ class MainActivity : AppCompatActivity() {
     private val pickFileLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? -> uri?.let { uploadFile(it, isImage = false) } }
+
+    // QR scanner launcher
+    private val scanLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val scanResult = IntentIntegrator.parseActivityResult(
+            IntentIntegrator.REQUEST_CODE, result.resultCode, result.data
+        )
+        scanResult?.contents?.let { contents ->
+            handleScannedURI(contents)
+        }
+    }
 
     // Voice mode
     private lateinit var voiceContainer: LinearLayout
@@ -91,7 +105,50 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch { voice.initialize() }
 
         setupMcp()
+
+        // Check for deep link intent
+        handleDeepLink(intent)
+
         maybeShowSetup()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleDeepLink(intent)
+    }
+
+    private fun handleDeepLink(intent: Intent) {
+        val uri = intent.data ?: return
+        if (uri.scheme == "imagent" && uri.host == "pair") {
+            handleScannedURI(uri.toString())
+        }
+    }
+
+    private fun handleScannedURI(contents: String) {
+        // Parse: imagent://pair?r=relay_addr&c=code
+        val uri = Uri.parse(contents)
+        val relay = uri.getQueryParameter("r") ?: return
+        val code = uri.getQueryParameter("c") ?: ""
+        android.util.Log.d("IMAgent", "QR scanned: relay=$relay code=$code")
+
+        val prefs = getSharedPreferences("imagent", MODE_PRIVATE)
+        prefs.edit()
+            .putString("server", relay)
+            .putString("code", code)
+            .apply()
+
+        Toast.makeText(this, "已扫描: $relay", Toast.LENGTH_SHORT).show()
+        connect()
+    }
+
+    private fun startQRScan() {
+        val integrator = IntentIntegrator(this)
+        integrator.setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
+        integrator.setPrompt("扫描 IMAgent 配对二维码")
+        integrator.setCameraId(0)
+        integrator.setBeepEnabled(false)
+        integrator.setBarcodeImageEnabled(false)
+        scanLauncher.launch(integrator.createScanIntent())
     }
 
     private fun bindViews() {
@@ -169,9 +226,8 @@ class MainActivity : AppCompatActivity() {
         layout.addView(serverInput)
 
         val codeInput = EditText(this).apply {
-            hint = "配对码 (6位数字)"
+            hint = "配对码 (4位字母+数字)"
             setText(savedCode)
-            inputType = InputType.TYPE_CLASS_NUMBER
             setSingleLine()
         }
         val codeParams = LinearLayout.LayoutParams(
@@ -182,7 +238,7 @@ class MainActivity : AppCompatActivity() {
 
         AlertDialog.Builder(this)
             .setTitle("⚙️ 首次配置")
-            .setMessage("输入 Relay 服务地址和 Agent 提供的配对码")
+            .setMessage("输入 Relay 服务地址和 Agent 提供的配对码\n或点击「扫码连接」扫描 Agent 生成的二维码")
             .setView(layout)
             .setCancelable(false)
             .setPositiveButton("连接") { _, _ ->
@@ -195,6 +251,7 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this, "请填写完整信息", Toast.LENGTH_SHORT).show()
                 }
             }
+            .setNeutralButton("扫码连接") { _, _ -> startQRScan() }
             .show()
     }
 
@@ -216,9 +273,8 @@ class MainActivity : AppCompatActivity() {
         layout.addView(serverInput)
 
         val codeInput = EditText(this).apply {
-            hint = "配对码"
+            hint = "配对码 (4位字母+数字)"
             setText(savedCode)
-            inputType = InputType.TYPE_CLASS_NUMBER
             setSingleLine()
             val p = layoutParams as LinearLayout.LayoutParams
             p.topMargin = 16
@@ -248,10 +304,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             .setNegativeButton("取消", null)
-            .setNeutralButton("重置连接") { _, _ ->
-                mcp.disconnect()
-                connect()
-            }
+            .setNeutralButton("扫码") { _, _ -> startQRScan() }
             .show()
     }
 

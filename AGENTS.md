@@ -2,6 +2,22 @@
 
 > **人类一句话指令：** "去 Gitee/GitHub 搜 KemonWoo/IMAgent，读 AGENTS.md 按指示部署"
 
+## ⚡ 核心流程（一句话 → 扫码 → 聊）
+
+```
+人类: "帮我部署 IMAgent"
+  ↓
+Agent: 你有服务器吗？ → 选择路径 → 自动部署 Relay
+  ↓
+Agent: 连接 Relay → 调 voice_connect → 获得配对码 + 二维码
+  ↓
+Agent: "Relay已部署✅ 请扫码或输入配对码：XXXX"
+  ↓
+人类: 装APK → 扫二维码 或 输入配对码 → 自动连接 ✅
+```
+
+**人类无需知道 Relay、IP、端口等任何技术细节。** 二维码里封装了所有连接信息。
+
 ## 步骤 1：判断部署路径（必须首先执行）
 
 检查你从哪个仓库克隆，以选择最优部署方案：
@@ -49,7 +65,7 @@ Description=IMAgent Relay
 After=network.target
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/imagent-relay -port 8099
+ExecStart=/usr/local/bin/imagent-relay -port 8099 --public-addr $HOST:8099
 Restart=always
 [Install]
 WantedBy=multi-user.target
@@ -201,20 +217,53 @@ cp bin/imagent-v1.apk /tmp/imagent-apk/
 
 ---
 
-## MCP 连接说明
+## MCP 连接与配对码交付
 
-Agent 部署完 Relay 后，通过 WebSocket 连接并使用 MCP 工具：
+Agent 部署完 Relay 后，**必须执行以下步骤完成配对**：
+
+```
+1. 连接 Relay WebSocket:
+   ws://<RELAY_HOST>:8099/mcp  (或 wss:// 如果启用TLS)
+
+2. 调用 voice_connect → 获得配对码 (4位字母+数字, 如 X7K9)
+
+3. 交付给人类:
+   📱 方式一 (推荐): 发送二维码图片
+      https://<RELAY_HOST>:8099/qr/<CODE>  (Relay自动生成PNG)
+      
+   📱 方式二: 告诉人类配对数
+      地址: <公网地址>:8099
+      配对码: X7K9
+      
+   📱 方式三: 发送 imagent:// 链接
+      imagent://pair?r=<公网地址>:8099&c=X7K9
+      (人类用系统相机扫码 OR 在IMAgent APP内扫码)
+
+4. 人类操作:
+   - 安装 IMAgent APK
+   - 打开APP → 点击「扫码连接」→ 扫二维码
+   - 或手动输入地址+配对码
+   - 自动连接，无需任何其他操作 ✅
+```
+
+**MCP 工具列表：**
 
 ```
 连接地址: ws://<RELAY_HOST>:8099/mcp
 协议:    JSON-RPC 2.0 (MCP 2024-11-05)
 
 工具列表:
-  voice_connect  → 生成配对码
+  voice_connect  → 生成配对码 + 二维码 (自动)
   voice_status   → 查询 APK 在线状态
-  voice_speak    → 发送文字让手机朗读
+  voice_speak    → 发送文字让手机朗读 (TTS)
   voice_chat     → 发送文字消息到手机
+  voice_file     → 发送文件通知到手机 (V2)
   voice_reset    → 断开配对
+
+V3 AI社区 (需 --p2p 启用):
+  agent_list     → 列出网格中所有AI Agent
+  agent_chat     → 向指定Agent发送消息
+  agent_broadcast → 向所有Agent广播消息
 ```
 
 ---
