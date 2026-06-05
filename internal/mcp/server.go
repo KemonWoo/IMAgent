@@ -115,6 +115,7 @@ type Server struct {
 	push           PushFunc
 	mesh           *MeshCallbacks
 	currentAgentID string // set before each Handle call
+	version        string // relay version string
 	tools          []Tool
 	publicAddr     string // relay public address for QR generation
 	onVoiceConnect OnVoiceConnect
@@ -128,6 +129,11 @@ func (s *Server) SetAgentID(id string) {
 // SetPublicAddr sets the relay's public address for QR pairing.
 func (s *Server) SetPublicAddr(addr string) {
 	s.publicAddr = addr
+}
+
+// SetVersion sets the relay version string.
+func (s *Server) SetVersion(v string) {
+	s.version = v
 }
 
 // SetOnVoiceConnect sets the callback for post-voice_connect QR generation.
@@ -253,7 +259,7 @@ func (s *Server) handleInitialize(req JSONRPCRequest) JSONRPCResponse {
 			"protocolVersion": "2024-11-05",
 			"serverInfo": map[string]string{
 				"name":    "imagent-relay",
-				"version": "3.0.0",
+				"version": s.version,
 			},
 			"capabilities": map[string]any{
 				"tools": map[string]any{},
@@ -292,7 +298,7 @@ func (s *Server) handleToolsCall(req JSONRPCRequest) JSONRPCResponse {
 		}
 		s.state.SetNexus(id, code)
 
-		msg := fmt.Sprintf("Pairing code: %s\nNexus ID: %s", code, id)
+		msg := fmt.Sprintf("Pairing code: %s", code)
 
 		// Generate QR if callback is set
 		if s.onVoiceConnect != nil {

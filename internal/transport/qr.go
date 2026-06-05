@@ -23,6 +23,11 @@ func (r *Relay) SetPublicAddr(addr string) {
 	r.mcpSrv.SetPublicAddr(addr)
 }
 
+// SetVersion sets the relay version for MCP server info.
+func (r *Relay) SetVersion(v string) {
+	r.mcpSrv.SetVersion(v)
+}
+
 // GetPublicAddr returns the relay's public address.
 func (r *Relay) GetPublicAddr() string {
 	if r.publicAddr != "" {

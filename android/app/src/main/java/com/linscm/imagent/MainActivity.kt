@@ -282,17 +282,21 @@ class MainActivity : AppCompatActivity() {
             hint = "配对码 (4位字母+数字)"
             setText(savedCode)
             setSingleLine()
-            val p = layoutParams as LinearLayout.LayoutParams
-            p.topMargin = 16
         }
-        layout.addView(codeInput)
+        val codeParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = 16 }
+        layout.addView(codeInput, codeParams)
 
         val statusInfo = TextView(this).apply {
             text = "状态: ${if (connected) "在线" else "离线"}\n语音引擎: ${if (voice.state != VoiceBridge.State.IDLE) "就绪" else "待初始化"}"
             setTextColor(0xFF888888.toInt())
             textSize = 13f
-            val p = layoutParams as LinearLayout.LayoutParams
-            p.topMargin = 16
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = 16 }
         }
         layout.addView(statusInfo)
 

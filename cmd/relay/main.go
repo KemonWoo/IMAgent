@@ -57,6 +57,7 @@ func main() {
 	if *publicAddr != "" {
 		relay.SetPublicAddr(*publicAddr)
 	}
+	relay.SetVersion(update.Version)
 
 	mux := http.NewServeMux()
 
