@@ -54,7 +54,7 @@
             android:id="@+id/subtitle_user"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="按住说话开始对话"
+            android:text="点按开始对话"
             android:textColor="#E0E0E0"
             android:textSize="16sp"
             android:layout_marginBottom="16dp"
@@ -82,7 +82,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="按住说话"
+            android:text="点按说话"
             android:textColor="#FFFFFF"
             android:textSize="16sp"
             android:fontFamily="sans-serif-medium" />

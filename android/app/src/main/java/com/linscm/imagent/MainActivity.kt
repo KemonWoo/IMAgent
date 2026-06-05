@@ -1,7 +1,9 @@
 package com.linscm.imagent
 
+import android.Manifest
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.drawable.GradientDrawable
@@ -76,6 +78,12 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // Request audio permission first
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 100)
+        }
+
         bindViews()
 
         voice = VoiceBridge(this).apply {
@@ -183,13 +191,7 @@ class MainActivity : AppCompatActivity() {
         textModeBtn.setOnClickListener { setMode(false) }
         settingsBtn.setOnClickListener { showSettings() }
 
-        micBtn.setOnTouchListener { _, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> { voice.startListening(); true }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { voice.stopListening(); true }
-                else -> false
-            }
-        }
+        micBtn.setOnClickListener { toggleVoice() }
         inputText.addTextChangedListener(object : android.text.TextWatcher {
             override fun afterTextChanged(s: android.text.Editable?) { 
                 val hasText = !s.isNullOrBlank() && connected
@@ -413,6 +415,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ── Mode switching ──
+
+    private var voiceActive = false
+
+    private fun toggleVoice() {
+        if (!voiceActive) {
+            voice.startListening()
+            voiceActive = true
+            micBtn.text = "⏹"
+            subtitleYou.text = "🎤 正在听..."
+        } else {
+            voice.stopListening()
+            voiceActive = false
+            micBtn.text = "🎤"
+            subtitleYou.text = ""
+        }
+    }
 
     private fun setMode(voice: Boolean) {
         isVoiceMode = voice
