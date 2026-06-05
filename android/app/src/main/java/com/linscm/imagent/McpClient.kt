@@ -9,6 +9,11 @@ import com.google.gson.JsonParser
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
 import java.net.URI
+import java.security.cert.X509Certificate
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocketFactory
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 
 /**
  * MCP WebSocket client for connecting to IMAgent Relay.
@@ -36,7 +41,7 @@ class McpClient(
         disconnect()
         Log.i(TAG, "connect: relayUrl=[$relayUrl] code=[$code]")
         try {
-            val uri = URI("ws://${relayUrl}/apk")
+            val uri = buildUri(relayUrl)
             Log.i(TAG, "connect: uri=$uri")
             ws = object : WebSocketClient(uri) {
                 override fun onOpen(handshake: ServerHandshake?) {
@@ -88,6 +93,9 @@ class McpClient(
             }
 
             handler.post { onStatus(Status.CONNECTING) }
+            if (uri.scheme == "wss") {
+                ws?.setSocketFactory(trustAllFactory())
+            }
             ws?.connect()
         } catch (e: Exception) {
             Log.e(TAG, "Connect failed: ${e.message}")
@@ -125,5 +133,28 @@ class McpClient(
 
     companion object {
         private const val TAG = "IMAgent-MCP"
+
+        /** Build WebSocket URI: if URL already has ws:// or wss://, use as-is;
+         *  otherwise default to wss:// for TLS relay. */
+        private fun buildUri(url: String): URI {
+            val cleaned = url.trim()
+            return if (cleaned.startsWith("ws://") || cleaned.startsWith("wss://")) {
+                URI("$cleaned/apk")
+            } else {
+                URI("wss://$cleaned/apk")
+            }
+        }
+
+        /** Create an SSLSocketFactory that trusts all certificates (self-signed). */
+        private fun trustAllFactory(): SSLSocketFactory {
+            val trustAll = arrayOf<TrustManager>(object : X509TrustManager {
+                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+            })
+            val ctx = SSLContext.getInstance("TLS")
+            ctx.init(null, trustAll, java.security.SecureRandom())
+            return ctx.socketFactory
+        }
     }
 }

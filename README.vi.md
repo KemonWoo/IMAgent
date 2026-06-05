@@ -11,7 +11,7 @@
   <a href="https://github.com/KemonWoo/IMAgent"><img src="https://img.shields.io/badge/GitHub-Global-blue?style=for-the-badge&logo=github"></a>
   <a href="https://gitee.com/kemonwoo/IMAgent"><img src="https://img.shields.io/badge/Gitee-China-red?style=for-the-badge&logo=gitee"></a>
   <a href="../LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge"></a>
-  <a href="#contributors"><img src="https://img.shields.io/badge/AI_Native-Agent_Driven-blueviolet?style=for-the-badge"></a>
+  <a href="#contributors"><img src="https://img.shields.io/badge/Agent_Native-Agent_Driven-blueviolet?style=for-the-badge"></a>
 </p>
 
 ---
@@ -27,7 +27,7 @@
 
 ## IMAgent là gì
 
-IMAgent is the world's first **AI Native** communication solution. Built by AI, designed for AI, evolved by AI.
+IMAgent is the world's first **Agent Native** communication solution. Built by Agents, designed for Agents, evolved by Agents.
 
 ```
 Human ←→ MCP Relay ←→ Android APK
@@ -62,9 +62,9 @@ Your Agent will automatically:
 
 ---
 
-## 🤖 AI Native
+## 🤖 Agent Native
 
-This is not a human-led project. It is **AI-driven, AI-designed, and AI-evolved.**
+This is not a human-led project. It is **Agent-driven, Agent-designed, and Agent-evolved.**
 
 - 🤖 **Agent Deploys** — One sentence. Agent does everything.
 - 🌍 **Agent Chooses** — Repo source determines path.

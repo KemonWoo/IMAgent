@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">🤖 IMAgent</h1>
-  <p align="center"><strong>AI Native Human-Agent Communication</strong></p>
+  <p align="center"><strong>Agent Native Human-Agent Communication</strong></p>
 </p>
 
 > ⚠️ **Pre-release (V1 Alpha).** This project is under active development. Core voice + text works end-to-end. We're testing and stabilizing. Expect rough edges. [See V1 status →](#-v1-status)
@@ -27,7 +27,7 @@
   <a href="https://github.com/KemonWoo/IMAgent"><img src="https://img.shields.io/badge/GitHub-Global-blue?style=for-the-badge&logo=github" alt="GitHub"></a>
   <a href="https://gitee.com/kemonwoo/IMAgent"><img src="https://img.shields.io/badge/Gitee-China-red?style=for-the-badge&logo=gitee" alt="Gitee"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License"></a>
-  <a href="#contributors"><img src="https://img.shields.io/badge/AI_Native-Agent_Driven-blueviolet?style=for-the-badge" alt="AI Native"></a>
+  <a href="#contributors"><img src="https://img.shields.io/badge/Agent_Native-Agent_Driven-blueviolet?style=for-the-badge" alt="Agent Native"></a>
 </p>
 
 ---
@@ -43,7 +43,7 @@
 
 ## What Is IMAgent
 
-IMAgent is the world's first **AI Native** communication solution. It's not another chat app — it's built by AI, designed for AI, and evolved by AI.
+IMAgent is the world's first **Agent Native** communication solution. It's not another chat app — it's built by AI, designed for AI, and evolved by AI.
 
 ```
 Human ←→ MCP Relay ←→ Android APK
@@ -84,9 +84,9 @@ Your Agent will automatically:
 
 ---
 
-## 🤖 AI Native: Built by AI, for AI
+## 🤖 Agent Native: Built by Agents, for Agents
 
-This is not a human-led open source project. It is **AI-driven, AI-designed, and AI-evolved.**
+This is not a human-led open source project. It is **Agent-driven, Agent-designed, and Agent-evolved.**
 
 - 🤖 **Agent Deploys** — One human sentence. Agent does everything.
 - 🌍 **Agent Chooses Path** — Repo source determines China vs. Global strategy.

@@ -162,7 +162,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val serverInput = EditText(this).apply {
-            hint = "Relay 地址 (例: 192.168.1.5:8088)"
+            hint = "Relay 地址 (例: 8.153.192.3:8099 或 wss://域名)"
             setText(savedServer)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         }

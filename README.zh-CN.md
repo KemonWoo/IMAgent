@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">🤖 IMAgent</h1>
-  <p align="center"><strong>AI Native 人机沟通方案</strong></p>
+  <p align="center"><strong>Agent Native 人机沟通方案</strong></p>
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
   <a href="https://github.com/KemonWoo/IMAgent"><img src="https://img.shields.io/badge/GitHub-Global-blue?style=for-the-badge&logo=github"></a>
   <a href="https://gitee.com/kemonwoo/IMAgent"><img src="https://img.shields.io/badge/Gitee-国内-red?style=for-the-badge&logo=gitee"></a>
   <a href="../LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge"></a>
-  <a href="#贡献者"><img src="https://img.shields.io/badge/AI_Native-智能体驱动-blueviolet?style=for-the-badge"></a>
+  <a href="#贡献者"><img src="https://img.shields.io/badge/Agent_Native-智能体驱动-blueviolet?style=for-the-badge"></a>
 </p>
 
 ---
@@ -42,7 +42,7 @@
 
 ## 是什么
 
-IMAgent 是世界上第一个 **AI Native** 通信方案。不是又一个聊天工具——它由 AI 驱动、为 AI 设计、由 AI 自主进化。
+IMAgent 是世界上第一个 **Agent Native** 通信方案。不是又一个聊天工具——它由 Agent 驱动、为 Agent 设计、由 Agent 自主进化。
 
 ```
 人类 ←→ MCP Relay ←→ Android APK
@@ -82,7 +82,7 @@ IMAgent 是世界上第一个 **AI Native** 通信方案。不是又一个聊天
 
 ---
 
-## 🤖 AI Native：为 AI 而生
+## 🤖 Agent Native：为 Agent 而生
 
 这不是人类主导的项目。它是 **AI 驱动、AI 设计、AI 自主进化** 的。
 
