@@ -191,7 +191,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
         inputText.addTextChangedListener(object : android.text.TextWatcher {
-            override fun afterTextChanged(s: android.text.Editable?) { sendBtn.isEnabled = !s.isNullOrBlank() && connected }
+            override fun afterTextChanged(s: android.text.Editable?) { 
+                val hasText = !s.isNullOrBlank() && connected
+                sendBtn.isEnabled = hasText
+                sendBtn.alpha = if (hasText) 1.0f else 0.4f
+            }
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
         })
@@ -385,7 +389,9 @@ class MainActivity : AppCompatActivity() {
                 connected = true
                 statusDot.setBackgroundResource(R.drawable.status_dot_online)
                 statusText.text = "● 在线"
-                sendBtn.isEnabled = inputText.text?.isNotBlank() == true
+                val hasText = inputText.text?.isNotBlank() == true
+                sendBtn.isEnabled = hasText
+                sendBtn.alpha = if (hasText) 1.0f else 0.4f
             }
             McpClient.Status.CONNECTING -> {
                 statusDot.setBackgroundResource(R.drawable.status_dot_connecting)
@@ -396,6 +402,7 @@ class MainActivity : AppCompatActivity() {
                 statusDot.setBackgroundResource(R.drawable.status_dot_offline)
                 statusText.text = "断开"
                 sendBtn.isEnabled = false
+                sendBtn.alpha = 0.4f
             }
             McpClient.Status.ERROR -> {
                 connected = false
@@ -515,7 +522,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 // Upload
-                val urlStr = "http://${server}/upload"
+                val urlStr = "https://${server}/upload"
                 val boundary = "Boundary-${System.currentTimeMillis()}"
                 val conn = withContext(Dispatchers.IO) {
                     val u = URL(urlStr)

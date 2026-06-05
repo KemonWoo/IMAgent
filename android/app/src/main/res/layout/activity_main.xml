@@ -150,16 +150,16 @@
                 android:id="@+id/file_btn"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:text="📎"
-                android:textSize="16sp"
                 android:background="@drawable/circle_accent"
+                android:drawableStart="@drawable/ic_attach"
+                android:text=""
                 android:layout_marginEnd="4dp" />
 
             <ImageButton
                 android:id="@+id/image_btn"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:src="@android:drawable/ic_menu_gallery"
+                android:src="@drawable/ic_image"
                 android:background="@drawable/circle_accent"
                 android:scaleType="centerInside"
                 android:contentDescription="发送图片"
@@ -169,20 +169,20 @@
                 android:id="@+id/voice_mode_btn"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:text="🎤"
-                android:textSize="20sp"
                 android:background="@drawable/circle_accent"
+                android:drawableStart="@drawable/ic_mic"
+                android:text=""
                 android:layout_marginEnd="4dp" />
 
             <Button
                 android:id="@+id/send_btn"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:text="↑"
-                android:textSize="18sp"
-                android:textColor="#666666"
-                android:background="@drawable/circle_disabled"
-                android:enabled="false" />
+                android:background="@drawable/circle_accent"
+                android:drawableStart="@drawable/ic_send"
+                android:text=""
+                android:enabled="false"
+                android:alpha="0.4" />
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>
