@@ -36,10 +36,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var textContainer: LinearLayout
     private lateinit var chatMessages: LinearLayout
     private lateinit var inputText: EditText
-    private lateinit var sendBtn: Button
+    private lateinit var sendBtn: ImageButton
     private lateinit var imageBtn: ImageButton
-    private lateinit var fileBtn: Button
-    private lateinit var voiceModeBtn: Button
+    private lateinit var fileBtn: ImageButton
+    private lateinit var voiceModeBtn: ImageButton
 
     // Image picker
     private val pickImageLauncher = registerForActivityResult(
@@ -193,11 +193,7 @@ class MainActivity : AppCompatActivity() {
 
         micBtn.setOnClickListener { toggleVoice() }
         inputText.addTextChangedListener(object : android.text.TextWatcher {
-            override fun afterTextChanged(s: android.text.Editable?) { 
-                val hasText = !s.isNullOrBlank() && connected
-                sendBtn.isEnabled = hasText
-                sendBtn.alpha = if (hasText) 1.0f else 0.4f
-            }
+            override fun afterTextChanged(s: android.text.Editable?) { }
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
         })
@@ -395,9 +391,6 @@ class MainActivity : AppCompatActivity() {
                 connected = true
                 statusDot.setBackgroundResource(R.drawable.status_dot_online)
                 statusText.text = "● 在线"
-                val hasText = inputText.text?.isNotBlank() == true
-                sendBtn.isEnabled = hasText
-                sendBtn.alpha = if (hasText) 1.0f else 0.4f
             }
             McpClient.Status.CONNECTING -> {
                 statusDot.setBackgroundResource(R.drawable.status_dot_connecting)
@@ -407,8 +400,6 @@ class MainActivity : AppCompatActivity() {
                 connected = false
                 statusDot.setBackgroundResource(R.drawable.status_dot_offline)
                 statusText.text = "断开"
-                sendBtn.isEnabled = false
-                sendBtn.alpha = 0.4f
             }
             McpClient.Status.ERROR -> {
                 connected = false
@@ -445,7 +436,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun sendText() {
         val text = inputText.text.toString().trim()
-        if (text.isEmpty() || !connected) return
+        if (text.isEmpty()) {
+            Toast.makeText(this, "请输入消息", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!connected) {
+            Toast.makeText(this, "未连接", Toast.LENGTH_SHORT).show()
+            return
+        }
         mcp.sendText(text)
         addBubble(text, true)
         inputText.text.clear()

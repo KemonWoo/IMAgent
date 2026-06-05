@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
@@ -146,43 +147,46 @@
                 android:maxLines="4"
                 android:inputType="textMultiLine" />
 
-            <Button
+            <ImageButton
                 android:id="@+id/file_btn"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
+                app:srcCompat="@drawable/ic_attach"
                 android:background="@drawable/circle_accent"
-                android:drawableStart="@drawable/ic_attach"
-                android:text=""
+                android:scaleType="centerInside"
+                android:contentDescription="发送文件"
                 android:layout_marginEnd="4dp" />
 
             <ImageButton
                 android:id="@+id/image_btn"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:src="@drawable/ic_image"
+                app:srcCompat="@drawable/ic_image"
                 android:background="@drawable/circle_accent"
                 android:scaleType="centerInside"
                 android:contentDescription="发送图片"
                 android:layout_marginEnd="4dp" />
 
-            <Button
+            <ImageButton
                 android:id="@+id/voice_mode_btn"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
+                app:srcCompat="@drawable/ic_mic"
                 android:background="@drawable/circle_accent"
-                android:drawableStart="@drawable/ic_mic"
-                android:text=""
+                android:scaleType="centerInside"
+                android:contentDescription="语音模式"
                 android:layout_marginEnd="4dp" />
 
-            <Button
+            <ImageButton
                 android:id="@+id/send_btn"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
+                app:srcCompat="@drawable/ic_send"
                 android:background="@drawable/circle_accent"
-                android:drawableStart="@drawable/ic_send"
-                android:text=""
-                android:enabled="false"
-                android:alpha="0.4" />
+                android:scaleType="centerInside"
+                android:contentDescription="发送"
+                android:enabled="true"
+                android:alpha="1.0" />
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>
