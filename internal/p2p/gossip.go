@@ -4,6 +4,7 @@ package p2p
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ type Gossiper struct {
 	peers       *PeerStore
 	routing     *RoutingTable
 	client      *http.Client
+	scheme      string // "http" or "https"
 	gossipEvery time.Duration
 	pruneEvery  time.Duration
 	maxPeerAge  time.Duration
@@ -42,12 +44,26 @@ func NewGossiper(nodeID NodeID, address string, peers *PeerStore, routing *Routi
 		peers:       peers,
 		routing:     routing,
 		client:      &http.Client{Timeout: 5 * time.Second},
+		scheme:      "http",
 		gossipEvery: 30 * time.Second,
 		pruneEvery:  120 * time.Second,
 		maxPeerAge:  300 * time.Second,
 		stopCh:      make(chan struct{}),
 		backoffs:    make(map[NodeID]*metrics.Backoff),
 		breakers:    make(map[NodeID]*metrics.CircuitBreaker),
+	}
+}
+
+// SetScheme changes the URL scheme for P2P calls (V2 TLS support).
+func (g *Gossiper) SetScheme(s string) {
+	g.scheme = s
+	if s == "https" {
+		g.client = &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+		}
 	}
 }
 
@@ -173,7 +189,7 @@ func (g *Gossiper) announce(remoteAddr string) error {
 		"address": g.address,
 	})
 	resp, err := g.client.Post(
-		fmt.Sprintf("http://%s/p2p/announce", remoteAddr),
+		fmt.Sprintf("%s://%s/p2p/announce", g.scheme, remoteAddr),
 		"application/json",
 		bytes.NewReader(body),
 	)
@@ -212,7 +228,7 @@ func (g *Gossiper) exchangePeers(remoteAddr string) {
 		return
 	}
 
-	resp, err := g.client.Get(fmt.Sprintf("http://%s/p2p/peers", remoteAddr))
+	resp, err := g.client.Get(fmt.Sprintf("%s://%s/p2p/peers", g.scheme, remoteAddr))
 	if err != nil {
 		cb.RecordFailure()
 		return
@@ -252,7 +268,7 @@ func (g *Gossiper) pushAgents(remoteAddr string, agents []AgentRef) {
 		"agents":  agents,
 	})
 	resp, err := g.client.Post(
-		fmt.Sprintf("http://%s/p2p/sync", remoteAddr),
+		fmt.Sprintf("%s://%s/p2p/sync", g.scheme, remoteAddr),
 		"application/json",
 		bytes.NewReader(body),
 	)

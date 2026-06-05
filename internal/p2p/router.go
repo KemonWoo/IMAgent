@@ -1,8 +1,9 @@
-// Package p2p — message forwarding (agent-to-agent routing).
+// Package p2p — message forwarding (agent-to-agent routing). V2: TLS support.
 package p2p
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ type Forwarder struct {
 	routing *RoutingTable
 	peers   *PeerStore
 	client  *http.Client
+	scheme  string // "http" or "https"
 	// deliverLocal is called to deliver a message to a local agent via its WebSocket.
 	deliverLocal func(agentID string, msg []byte) error
 }
@@ -28,12 +30,25 @@ func NewForwarder(nodeID NodeID, routing *RoutingTable, peers *PeerStore, delive
 		routing:      routing,
 		peers:        peers,
 		client:       &http.Client{Timeout: 10 * time.Second},
+		scheme:       "http",
 		deliverLocal: deliverLocal,
 	}
 }
 
+// SetScheme changes the URL scheme for forwarding calls (V2 TLS support).
+func (f *Forwarder) SetScheme(s string) {
+	f.scheme = s
+	if s == "https" {
+		f.client = &http.Client{
+			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+		}
+	}
+}
+
 // RouteMessage routes a message to a target agent.
-// If the target is local, deliver directly. Otherwise, forward to the target's relay.
 func (f *Forwarder) RouteMessage(targetAgentID string, msg []byte) error {
 	nodeID := f.routing.Lookup(targetAgentID)
 
@@ -42,11 +57,9 @@ func (f *Forwarder) RouteMessage(targetAgentID string, msg []byte) error {
 	}
 
 	if nodeID == f.nodeID {
-		// Local delivery
 		return f.deliverLocal(targetAgentID, msg)
 	}
 
-	// Remote — forward to peer relay
 	peer := f.peers.Get(nodeID)
 	if peer == nil {
 		return fmt.Errorf("peer %s not found", nodeID)
@@ -55,7 +68,6 @@ func (f *Forwarder) RouteMessage(targetAgentID string, msg []byte) error {
 	return f.forwardHTTP(peer.Address, targetAgentID, msg)
 }
 
-// forwardHTTP POSTs a message to a remote relay's /p2p/forward endpoint.
 func (f *Forwarder) forwardHTTP(peerAddr, targetAgentID string, msg []byte) error {
 	body, _ := json.Marshal(map[string]interface{}{
 		"from_node": string(f.nodeID),
@@ -64,7 +76,7 @@ func (f *Forwarder) forwardHTTP(peerAddr, targetAgentID string, msg []byte) erro
 	})
 
 	resp, err := f.client.Post(
-		fmt.Sprintf("http://%s/p2p/forward", peerAddr),
+		fmt.Sprintf("%s://%s/p2p/forward", f.scheme, peerAddr),
 		"application/json",
 		bytes.NewReader(body),
 	)
@@ -81,7 +93,7 @@ func (f *Forwarder) forwardHTTP(peerAddr, targetAgentID string, msg []byte) erro
 	return nil
 }
 
-// HandleForward handles POST /p2p/forward — receive a forwarded message for a local agent.
+// HandleForward handles POST /p2p/forward.
 func (f *Forwarder) HandleForward(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST required", http.StatusMethodNotAllowed)
@@ -105,7 +117,6 @@ func (f *Forwarder) HandleForward(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("P2P forward: %s → agent %s (from node %s)", f.nodeID, req.ToAgent, req.FromNode)
 
-	// Deliver to local agent
 	if err := f.deliverLocal(req.ToAgent, req.Message); err != nil {
 		log.Printf("P2P forward deliver: %v", err)
 		http.Error(w, fmt.Sprintf("deliver failed: %v", err), http.StatusNotFound)

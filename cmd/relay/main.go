@@ -1,17 +1,25 @@
 // IMAgent Relay — MCP server for Agent-to-APK voice, text, and file communication.
-// V3: P2P mesh for AI community. V4: Self-evolution (metrics, self-healing, auto-update).
+// V3: P2P mesh for AI community. V4: Self-evolution. V2: TLS encryption.
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"log"
+	"math/big"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/KemonWoo/IMAgent/internal/transport"
 	"github.com/KemonWoo/IMAgent/internal/update"
@@ -21,6 +29,11 @@ func main() {
 	port := flag.Int("port", 8099, "HTTP/WebSocket listen port")
 	wwwDir := flag.String("www", "/var/www/html", "Static file serving directory (APK hosting)")
 	uploadsDir := flag.String("uploads", filepath.Join(os.TempDir(), "imagent-uploads"), "File upload storage directory")
+
+	// V2: TLS encryption
+	tlsCert := flag.String("tls-cert", "", "TLS certificate file (PEM). Enables HTTPS/wss when set.")
+	tlsKey := flag.String("tls-key", "", "TLS private key file (PEM). Required with --tls-cert.")
+	autoCert := flag.String("auto-cert", "", "Auto-generate self-signed cert+key to this directory. Prompts user to trust on first connect.")
 
 	// V3: P2P mesh
 	p2pNodeID := flag.String("p2p-id", "", "Unique node ID for this relay in the mesh (auto-generated if empty)")
@@ -71,7 +84,7 @@ func main() {
 	// File upload
 	mux.HandleFunc("/upload", relay.HandleUpload)
 
-	// File download — merges wwwDir and uploadsDir
+	// File download
 	os.MkdirAll(*wwwDir, 0755)
 	os.MkdirAll(*uploadsDir, 0755)
 	mux.HandleFunc("/dl/", func(w http.ResponseWriter, r *http.Request) {
@@ -110,6 +123,37 @@ func main() {
 	// V4: Start self-healing health checker
 	relay.StartHealthCheck()
 
+	// --- TLS setup ---
+	certFile := *tlsCert
+	keyFile := *tlsKey
+	useTLS := certFile != "" && keyFile != ""
+
+	// Auto-generate self-signed cert if --auto-cert is set and no explicit cert
+	if *autoCert != "" && !useTLS {
+		os.MkdirAll(*autoCert, 0700)
+		certFile = filepath.Join(*autoCert, "cert.pem")
+		keyFile = filepath.Join(*autoCert, "key.pem")
+		if _, err := os.Stat(certFile); os.IsNotExist(err) {
+			if err := generateSelfSigned(certFile, keyFile); err != nil {
+				log.Fatalf("Auto-cert generation failed: %v", err)
+			}
+			log.Printf("TLS: auto-generated self-signed cert in %s", *autoCert)
+		}
+		useTLS = true
+	}
+
+	// Build scheme strings for logging
+	scheme := "http"
+	wsScheme := "ws"
+	p2pScheme := "http"
+	if useTLS {
+		scheme = "https"
+		wsScheme = "wss"
+		p2pScheme = "https"
+		// Set TLS config for P2P HTTP client
+		relay.SetUseTLS(true)
+	}
+
 	addr := fmt.Sprintf(":%d", *port)
 	server := &http.Server{
 		Addr:    addr,
@@ -127,24 +171,79 @@ func main() {
 		server.Close()
 	}()
 
-	log.Printf("IMAgent Relay %s listening on %s", update.Version, addr)
-	log.Printf("  Agent MCP endpoint: ws://0.0.0.0:%d/mcp", *port)
-	log.Printf("  APK endpoint:        ws://0.0.0.0:%d/apk", *port)
-	log.Printf("  Health check:        http://0.0.0.0:%d/health", *port)
-	log.Printf("  Metrics:             http://0.0.0.0:%d/metrics", *port)
-	log.Printf("  Version:             http://0.0.0.0:%d/version", *port)
+	log.Printf("IMAgent Relay %s listening on %s (%s)", update.Version, addr, scheme)
+	log.Printf("  Agent MCP endpoint: %s://0.0.0.0:%d/mcp", wsScheme, *port)
+	log.Printf("  APK endpoint:        %s://0.0.0.0:%d/apk", wsScheme, *port)
+	log.Printf("  Health check:        %s://0.0.0.0:%d/health", scheme, *port)
+	log.Printf("  Metrics:             %s://0.0.0.0:%d/metrics", scheme, *port)
+	log.Printf("  Version:             %s://0.0.0.0:%d/version", scheme, *port)
 	log.Printf("  File hosting:        %s", *wwwDir)
 	log.Printf("  Upload storage:      %s", *uploadsDir)
 
 	if p2pNode != "" {
-		log.Printf("  P2P mesh:            enabled (node=%s, addr=%s)", p2pNode, p2pAddress)
+		log.Printf("  P2P mesh:            enabled (node=%s, addr=%s://%s)", p2pNode, p2pScheme, p2pAddress)
 		if *peers != "" {
 			log.Printf("  Bootstrap peers:     %s", *peers)
 		}
 	}
 
-	if err := server.ListenAndServe(); err != http.ErrServerClosed {
-		log.Fatalf("Server error: %v", err)
+	var serveErr error
+	if useTLS {
+		serveErr = server.ListenAndServeTLS(certFile, keyFile)
+	} else {
+		serveErr = server.ListenAndServe()
+	}
+	if serveErr != http.ErrServerClosed {
+		log.Fatalf("Server error: %v", serveErr)
 	}
 	log.Println("Server stopped")
+}
+
+// generateSelfSigned creates a self-signed TLS certificate valid for 1 year.
+func generateSelfSigned(certFile, keyFile string) error {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return fmt.Errorf("keygen: %w", err)
+	}
+
+	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	tmpl := &x509.Certificate{
+		SerialNumber: serial,
+		Subject: pkix.Name{
+			CommonName:   "IMAgent Relay",
+			Organization: []string{"IMAgent Self-Signed"},
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{"localhost"},
+		IPAddresses:           nil,
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
+	if err != nil {
+		return fmt.Errorf("cert create: %w", err)
+	}
+
+	// Write cert
+	certOut, err := os.Create(certFile)
+	if err != nil {
+		return err
+	}
+	defer certOut.Close()
+	pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+
+	// Write key
+	keyOut, err := os.Create(keyFile)
+	if err != nil {
+		return err
+	}
+	defer keyOut.Close()
+	privBytes, _ := x509.MarshalECPrivateKey(priv)
+	pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
+	os.Chmod(keyFile, 0600)
+
+	return nil
 }

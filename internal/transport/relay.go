@@ -42,6 +42,7 @@ type Relay struct {
 	peers     *p2p.PeerStore
 	gossiper  *p2p.Gossiper
 	forwarder *p2p.Forwarder
+	useTLS    bool   // V2: whether P2P calls should use HTTPS
 
 	// V4: Self-evolution
 	metricsReg  *metrics.Registry
@@ -126,6 +127,24 @@ func (r *Relay) Stop() {
 	if r.gossiper != nil {
 		r.gossiper.Stop()
 	}
+}
+
+// SetUseTLS enables TLS for outbound P2P mesh calls (V2).
+func (r *Relay) SetUseTLS(v bool) {
+	r.useTLS = v
+	if r.gossiper != nil {
+		r.gossiper.SetScheme(scheme(v))
+	}
+	if r.forwarder != nil {
+		r.forwarder.SetScheme(scheme(v))
+	}
+}
+
+func scheme(tls bool) string {
+	if tls {
+		return "https"
+	}
+	return "http"
 }
 
 // ---------- V4: Self-Evolution methods ----------
