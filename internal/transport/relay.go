@@ -505,8 +505,24 @@ func (r *Relay) HandleAPKWS(w http.ResponseWriter, req *http.Request) {
 		if err := json.Unmarshal(raw, &msg); err != nil {
 			continue
 		}
-		msg["from"] = "apk"
-		r.sessions.RouteFromAPK(raw)
+
+		msgType, _ := msg["type"].(string)
+		msgContent, _ := msg["content"].(string)
+
+		// Wrap APK message as MCP notification for agents
+		notif := map[string]any{
+			"jsonrpc": "2.0",
+			"method":  "notifications/apk_chat",
+			"params": map[string]any{
+				"type":    msgType,
+				"content": msgContent,
+			},
+		}
+		notifRaw, err := json.Marshal(notif)
+		if err != nil {
+			continue
+		}
+		r.sessions.RouteFromAPK(notifRaw)
 	}
 
 	close(writeCh)
