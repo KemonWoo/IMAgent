@@ -20,6 +20,7 @@ var qrCache = struct {
 // SetPublicAddr sets the relay's public address for QR code generation.
 func (r *Relay) SetPublicAddr(addr string) {
 	r.publicAddr = addr
+	r.mcpSrv.SetPublicAddr(addr)
 }
 
 // GetPublicAddr returns the relay's public address.
