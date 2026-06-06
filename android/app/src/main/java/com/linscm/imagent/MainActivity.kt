@@ -24,6 +24,8 @@ import kotlinx.coroutines.withContext
 import java.io.*
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.cert.X509Certificate
+import javax.net.ssl.*
 
 class MainActivity : AppCompatActivity() {
 
@@ -555,10 +557,14 @@ class MainActivity : AppCompatActivity() {
                 val boundary = "Boundary-${System.currentTimeMillis()}"
                 val conn = withContext(Dispatchers.IO) {
                     val u = URL(urlStr)
-                    val c = u.openConnection() as HttpURLConnection
-                    c.requestMethod = "POST"
-                    c.doOutput = true
-                    c.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                    val c = u.openConnection()
+                    (c as? HttpsURLConnection)?.sslSocketFactory = trustAllSSLSocketFactory()
+                    (c as? HttpsURLConnection)?.hostnameVerifier = HostnameVerifier { _, _ -> true }
+                    (c as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        doOutput = true
+                        setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                    }
                     val out = DataOutputStream(c.outputStream)
                     out.writeBytes("--$boundary\r\n")
                     out.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"$fileName\"\r\n")
@@ -688,5 +694,18 @@ class MainActivity : AppCompatActivity() {
         voice.shutdown()
         mcp.disconnect()
         super.onDestroy()
+    }
+
+    companion object {
+        private val trustAllSSLContext: SSLContext by lazy {
+            val tm = arrayOf<TrustManager>(object : X509TrustManager {
+                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+            })
+            SSLContext.getInstance("TLS").apply { init(null, tm, java.security.SecureRandom()) }
+        }
+
+        fun trustAllSSLSocketFactory(): SSLSocketFactory = trustAllSSLContext.socketFactory
     }
 }
