@@ -23,7 +23,21 @@ var (
 	apiKey    string
 	apiBase   = "https://api.deepseek.com/v1"
 	apiModel  = "deepseek-v4-pro"
+	
+	// Conversation history (ring buffer, last 20 turns)
+	history    []map[string]string
+	historyMax = 20
 )
+
+var systemPrompt = `你是知微，用户的私人AI助手，正在通过IMAgent进行一对一语音对话。
+
+【核心规则】
+1. 只回答用户当前问的问题，不要发散、不要编故事、不要扮演其他角色
+2. 回答简洁直接，控制在2-4句话以内（这是语音对话，不是写文章）
+3. 用户问什么你答什么，用户没问的不要主动展开
+4. 用日常口语化中文，像朋友聊天一样自然
+5. 绝对不要假装在和第三方通话，你只和当前用户一对一对话
+6. 如果没听清或不确定，直接说"没听清，能再说一遍吗？"`
 
 func main() {
 	// Read API key from file or env
@@ -142,6 +156,15 @@ func handleMessage(conn *websocket.Conn, msg map[string]interface{}) {
 			}
 			log.Printf("🤖 LLM: %s", truncate(reply, 80))
 
+			// Save to conversation history
+			history = append(history,
+				map[string]string{"role": "user", "content": content},
+				map[string]string{"role": "assistant", "content": reply},
+			)
+			if len(history) > historyMax*2 {
+				history = history[len(history)-historyMax*2:]
+			}
+
 			sendVoiceChat(conn, reply)
 		}
 
@@ -174,15 +197,23 @@ func sendVoiceChat(conn *websocket.Conn, text string) {
 }
 
 func callDeepSeek(prompt string) (string, error) {
+	// Build messages with conversation history
+	messages := []map[string]string{
+		{"role": "system", "content": systemPrompt},
+	}
+	// Add history
+	for _, h := range history {
+		messages = append(messages, h)
+	}
+	// Add current user message
+	messages = append(messages, map[string]string{"role": "user", "content": prompt})
+
 	reqBody := map[string]interface{}{
-		"model": apiModel,
-		"messages": []map[string]string{
-			{"role": "system", "content": "你是知微，一个IMAgent AI助手。简洁友好地回复用户。用中文。"},
-			{"role": "user", "content": prompt},
-		},
-		"max_tokens":   500,
-		"temperature":  0.7,
-		"stream":       false,
+		"model":       apiModel,
+		"messages":    messages,
+		"max_tokens":  300,
+		"temperature": 0.5,
+		"stream":      false,
 	}
 
 	body, _ := json.Marshal(reqBody)
