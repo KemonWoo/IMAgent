@@ -9,6 +9,8 @@ import android.graphics.BitmapFactory
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.view.Gravity
 import android.view.MotionEvent
@@ -77,6 +79,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var settingsBtn: TextView
 
+    // ── Mode switching ──
+
+    private var voiceActive = false
+    private val handler = Handler(Looper.getMainLooper())
+
+    private fun autoListen() {
+        if (!voiceActive && isVoiceMode) {
+            voice.startListening()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -99,14 +112,28 @@ class MainActivity : AppCompatActivity() {
             onStateChange = { state ->
                 runOnUiThread {
                     when (state) {
-                        VoiceBridge.State.LISTENING -> subtitleYou.text = "🎤 正在听..."
-                        VoiceBridge.State.PROCESSING -> subtitleYou.text = "⏳ 识别中..."
+                        VoiceBridge.State.LISTENING -> {
+                            subtitleYou.text = "🎤 正在听..."
+                            voiceActive = true
+                            micBtn.text = "⏹"
+                        }
+                        VoiceBridge.State.PROCESSING -> subtitleYou.text = "⏳ 识别中.."
                         VoiceBridge.State.SPEAKING -> subtitleAI.text = "🔊 朗读中..."
                         VoiceBridge.State.IDLE -> {
                             if (subtitleYou.text.startsWith("🎤") || subtitleYou.text.startsWith("⏳"))
                                 subtitleYou.text = ""
                             if (subtitleAI.text.startsWith("🔊")) subtitleAI.text = ""
+                            voiceActive = false
+                            micBtn.text = "🎤"
                         }
+                    }
+                }
+            }
+            onSpeakComplete = {
+                // After TTS finishes → auto-restart listening if still in voice mode
+                runOnUiThread {
+                    if (isVoiceMode) {
+                        handler.postDelayed({ autoListen() }, 600)
                     }
                 }
             }
@@ -413,8 +440,6 @@ class MainActivity : AppCompatActivity() {
 
     // ── Mode switching ──
 
-    private var voiceActive = false
-
     private fun toggleVoice() {
         if (!voiceActive) {
             voice.startListening()
@@ -429,11 +454,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setMode(voice: Boolean) {
-        isVoiceMode = voice
-        voiceContainer.visibility = if (voice) View.VISIBLE else View.GONE
-        textContainer.visibility = if (voice) View.GONE else View.VISIBLE
-        if (!voice) inputText.requestFocus()
+    private fun setMode(voiceMode: Boolean) {
+        isVoiceMode = voiceMode
+        voiceContainer.visibility = if (voiceMode) View.VISIBLE else View.GONE
+        textContainer.visibility = if (voiceMode) View.GONE else View.VISIBLE
+        if (voiceMode) {
+            handler.postDelayed({ autoListen() }, 500)
+        } else {
+            voice.stopListening()
+            voiceActive = false
+            inputText.requestFocus()
+        }
     }
 
     private fun sendText() {

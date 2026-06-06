@@ -31,6 +31,7 @@ class VoiceBridge(private val ctx: Context) {
     var onTranscript: ((String) -> Unit)? = null
     var onStateChange: ((State) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
+    var onSpeakComplete: (() -> Unit)? = null
 
     // sherpa-onnx 1.13.x engines (all take AssetManager)
     private var recognizer: OfflineRecognizer? = null
@@ -256,7 +257,10 @@ class VoiceBridge(private val ctx: Context) {
             } catch (e: Exception) {
                 Log.e(TAG, "TTS error", e)
                 withContext(Dispatchers.Main) { onError?.invoke("语音合成失败") }
-            } finally { if (state == State.SPEAKING) setState(State.IDLE) }
+            } finally {
+            if (state == State.SPEAKING) setState(State.IDLE)
+            withContext(Dispatchers.Main) { onSpeakComplete?.invoke() }
+        }
         }
     }
 
