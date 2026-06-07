@@ -27,12 +27,15 @@ import java.io.*
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.cert.X509Certificate
+import android.speech.tts.TextToSpeech
+import java.util.Locale
 import javax.net.ssl.*
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var mcp: McpClient
     private lateinit var voice: VoiceBridge
+    private var systemTts: TextToSpeech? = null
     private var isVoiceMode = false
     private var connected = false
 
@@ -357,12 +360,12 @@ class MainActivity : AppCompatActivity() {
                         val content = json.get("content")?.asString ?: return@McpClient
                         runOnUiThread {
                             addBubble(content, false)
-                            if (isVoiceMode) { subtitleAI.text = content; voice.speak(content) }
+                            if (isVoiceMode) { subtitleAI.text = content; speakWithTts(content) }
                         }
                     }
                     "tts" -> {
                         val content = json.get("content")?.asString ?: return@McpClient
-                        runOnUiThread { voice.speak(content) }
+                        runOnUiThread { speakWithTts(content) }
                     }
                     "reset" -> runOnUiThread {
                         connected = false
@@ -722,9 +725,76 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        systemTts?.shutdown()
+        systemTts = null
         voice.shutdown()
         mcp.disconnect()
         super.onDestroy()
+    }
+
+    // ── System TTS (mirrors Trix Voice implementation) ──
+
+    private fun speakWithTts(text: String) {
+        if (text.isBlank()) return
+        handler.post {
+            try {
+                val tts = systemTts
+                if (tts == null) {
+                    // Lazy init — Trix Voice pattern
+                    systemTts = TextToSpeech(this) { status ->
+                        if (status == TextToSpeech.SUCCESS) {
+                            val t = systemTts ?: return@TextToSpeech
+                            // Completion listener → auto-restart listening
+                            t.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                                override fun onStart(id: String?) {
+                                    runOnUiThread { subtitleAI.text = "🔊 朗读中..." }
+                                }
+                                override fun onDone(id: String?) {
+                                    runOnUiThread {
+                                        subtitleAI.text = ""
+                                        if (isVoiceMode) handler.postDelayed({ autoListen() }, 600)
+                                    }
+                                }
+                                @Suppress("DEPRECATION")
+                                override fun onError(id: String?) {}
+                            })
+                            val langResult = t.setLanguage(Locale.SIMPLIFIED_CHINESE)
+                            if (langResult == TextToSpeech.LANG_MISSING_DATA ||
+                                langResult == TextToSpeech.LANG_NOT_SUPPORTED) {
+                                android.util.Log.w("IMAgent", "TTS: 中文不支持, 使用默认语言")
+                            }
+                            // Pick best Chinese voice
+                            var bestVoice: android.speech.tts.Voice? = null
+                            for (v in t.voices) {
+                                if (v.locale.language == "zh") {
+                                    if (bestVoice == null) bestVoice = v
+                                    if (v.quality > bestVoice!!.quality) bestVoice = v
+                                    val name = v.name.lowercase()
+                                    if (name.contains("female") || name.contains("xiaoyan") ||
+                                        name.contains("yuxi") || name.contains("xiaoxiao")) {
+                                        bestVoice = v
+                                        break
+                                    }
+                                }
+                            }
+                            if (bestVoice != null) {
+                                t.voice = bestVoice
+                                android.util.Log.i("IMAgent", "TTS voice: ${bestVoice.name} quality=${bestVoice.quality}")
+                            }
+                            t.setSpeechRate(0.9f)
+                            t.setPitch(1.05f)
+                            t.speak(text, TextToSpeech.QUEUE_FLUSH, null, "imagent_tts_${System.currentTimeMillis()}")
+                        } else {
+                            android.util.Log.e("IMAgent", "TTS init failed, status=$status")
+                        }
+                    }
+                } else {
+                    tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "imagent_tts_${System.currentTimeMillis()}")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("IMAgent", "TTS speak error: ${e.message}")
+            }
+        }
     }
 
     companion object {
