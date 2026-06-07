@@ -46,7 +46,7 @@ class VoiceBridge(private val ctx: Context) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     data class VoiceSettings(
-        val speed: Float = 1.0f,
+        val speed: Float = 0.85f,
         val language: String = "zh"
     )
 
@@ -266,14 +266,24 @@ class VoiceBridge(private val ctx: Context) {
 
     private suspend fun playAudio(samples: FloatArray, sampleRate: Int) = withContext(Dispatchers.IO) {
         try {
+            val shorts = ShortArray(samples.size) { (samples[it] * Short.MAX_VALUE).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort() }
             val bs = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+                .coerceAtLeast(4096)
             audioTrack = AudioTrack.Builder()
                 .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
                 .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(sampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                .setBufferSizeInBytes(bs).build()
+                .setBufferSizeInBytes(bs * 2)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
             audioTrack?.play()
-            val shorts = ShortArray(samples.size) { (samples[it] * Short.MAX_VALUE).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort() }
-            audioTrack?.write(shorts, 0, shorts.size)
+            // Write in chunks to avoid buffer overflow
+            var offset = 0
+            val chunkSize = 4096
+            while (offset < shorts.size) {
+                val len = minOf(chunkSize, shorts.size - offset)
+                audioTrack?.write(shorts, offset, len)
+                offset += len
+            }
             audioTrack?.stop(); audioTrack?.release(); audioTrack = null
         } catch (e: Exception) {
             Log.e(TAG, "Playback error", e)
