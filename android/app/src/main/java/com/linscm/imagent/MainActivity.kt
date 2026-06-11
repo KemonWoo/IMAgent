@@ -141,9 +141,10 @@ class MainActivity : AppCompatActivity() {
         }
         lifecycleScope.launch { voice.initialize() }
 
-        // Restore saved voice speed
+        // Restore saved voice speed + speaker
         val savedSpeed = getSharedPreferences("imagent", MODE_PRIVATE).getFloat("voice_speed", 0.85f)
-        voice.settings = VoiceBridge.VoiceSettings(speed = savedSpeed)
+        val savedSid = getSharedPreferences("imagent", MODE_PRIVATE).getInt("voice_sid", 0)
+        voice.settings = VoiceBridge.VoiceSettings(speed = savedSpeed, sid = savedSid)
 
         setupMcp()
 
@@ -353,8 +354,45 @@ class MainActivity : AppCompatActivity() {
         }
         layout.addView(speedBar)
 
+        // ── Speaker selector ──
+        val speakerLabel = TextView(this).apply {
+            text = "🎤 说话人: #${voice.settings.sid}"
+            setTextColor(0xFFCBD5E1.toInt())
+            textSize = 14f
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = 20 }
+        }
+        layout.addView(speakerLabel)
+
+        val speakerBar = SeekBar(this).apply {
+            max = 173  // 174 speakers (0-173)
+            progress = voice.settings.sid.coerceIn(0, 173)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    speakerLabel.text = "🎤 说话人: #$progress"
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                    val sid = (seekBar?.progress ?: 0).coerceIn(0, 173)
+                    voice.settings = VoiceBridge.VoiceSettings(
+                        speed = voice.settings.speed,
+                        sid = sid
+                    )
+                    getSharedPreferences("imagent", MODE_PRIVATE).edit()
+                        .putInt("voice_sid", sid).apply()
+                }
+            })
+        }
+        layout.addView(speakerBar)
+
         val statusInfo = TextView(this).apply {
-            text = "状态: ${if (connected) "在线" else "离线"}\n语音引擎: sherpa-onnx vits-melo (zh_en)"
+            text = "状态: ${if (connected) "在线" else "离线"}\n语音引擎: sherpa-onnx vits-icefall (174音色)"
             setTextColor(0xFF888888.toInt())
             textSize = 13f
             layoutParams = LinearLayout.LayoutParams(

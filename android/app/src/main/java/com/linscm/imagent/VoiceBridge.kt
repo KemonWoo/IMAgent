@@ -47,6 +47,7 @@ class VoiceBridge(private val ctx: Context) {
 
     data class VoiceSettings(
         val speed: Float = 0.85f,
+        val sid: Int = 0,
         val language: String = "zh"
     )
 
@@ -59,10 +60,10 @@ class VoiceBridge(private val ctx: Context) {
     // ── Asset paths (relative to assets/) ──
     private val asrModelPath  = "models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/model.int8.onnx"
     private val asrTokensPath = "models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/tokens.txt"
-    private val ttsModelPath  = "models/vits-melo-tts-zh_en/model.onnx"
-    private val ttsTokensPath = "models/vits-melo-tts-zh_en/tokens.txt"
-    private val ttsLexiconPath = "models/vits-melo-tts-zh_en/lexicon.txt"
-    private val ttsDataDir    = "models/vits-melo-tts-zh_en"
+    private val ttsModelPath  = "models/vits-icefall-zh-aishell3/model.onnx"
+    private val ttsTokensPath = "models/vits-icefall-zh-aishell3/tokens.txt"
+    private val ttsLexiconPath = "models/vits-icefall-zh-aishell3/lexicon.txt"
+    private val ttsDataDir    = "models/vits-icefall-zh-aishell3"
     private val vadModelPath  = "models/silero_vad.onnx"
 
     // ── Init ──
@@ -128,7 +129,7 @@ class VoiceBridge(private val ctx: Context) {
             val config = OfflineTtsConfig(model = modelCfg)
             if (tts != null) { tts?.release() }
             tts = OfflineTts(ctx.assets, config)
-            Log.i(TAG, "TTS OK (vits-melo)")
+            Log.i(TAG, "TTS OK (vits-icefall, 174 speakers)")
             true
         } catch (e: Exception) {
             Log.e(TAG, "TTS init failed", e)
@@ -251,7 +252,7 @@ class VoiceBridge(private val ctx: Context) {
             try {
                 val t = tts
                 if (t != null) {
-                    val audio = t.generate(text, sid = 0, speed = settings.speed)
+                    val audio = t.generate(text, sid = settings.sid, speed = settings.speed)
                     playAudio(audio.samples, audio.sampleRate)
                 } else { delay(1500) }
             } catch (e: Exception) {
