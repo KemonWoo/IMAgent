@@ -18,29 +18,31 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// Provider config
+type LLMConfig struct {
+	APIBase string
+	Model   string
+	APIKey  string
+}
+
 var (
 	pairCode string
-	apiKey   string
-	apiBase  = "https://api.deepseek.com/v1"
-	apiModel = "deepseek-v4-pro"
+	llmCfg   LLMConfig
 )
 
-// No system prompt — Trix Voice pattern: send user message directly.
-// DeepSeek V4 Pro performs better without restrictive negative prompts.
-
 func main() {
-	// Read API key from file or env
-	apiKey = os.Getenv("DEEPSEEK_API_KEY")
-	if apiKey == "" {
-		data, err := os.ReadFile("/tmp/ds_key.txt")
-		if err == nil {
-			apiKey = strings.TrimSpace(string(data))
-		}
+	// All LLM config from env vars — no provider identification in code
+	llmCfg.APIBase = os.Getenv("LLM_API_BASE")
+	llmCfg.Model  = os.Getenv("LLM_MODEL")
+	llmCfg.APIKey = readKey("LLM_API_KEY", "/tmp/llm_key.txt")
+
+	if llmCfg.APIBase == "" || llmCfg.Model == "" {
+		log.Fatal("LLM_API_BASE and LLM_MODEL env vars required")
 	}
-	if apiKey == "" {
-		log.Fatal("DEEPSEEK_API_KEY not set and /tmp/ds_key.txt not found")
+	if llmCfg.APIKey == "" {
+		log.Fatal("LLM_API_KEY not set and /tmp/llm_key.txt not found")
 	}
-	log.Printf("API key loaded (%d chars)", len(apiKey))
+	log.Printf("Key loaded (%d chars) | %s", len(llmCfg.APIKey), llmCfg.Model)
 
 	if len(os.Args) > 1 {
 		pairCode = os.Args[1]
@@ -69,7 +71,7 @@ func main() {
 		"jsonrpc": "2.0", "id": 1, "method": "initialize",
 		"params": map[string]interface{}{
 			"protocolVersion": "2024-11-05",
-			"clientInfo":      map[string]string{"name": "hermes-agent", "version": "0.0.13"},
+			"clientInfo":      map[string]string{"name": "hermes-agent", "version": "0.0.16"},
 		},
 	})
 	var resp map[string]interface{}
@@ -88,12 +90,11 @@ func main() {
 		log.Printf("Pairing code: %s", pairCode)
 	}
 
-	log.Printf("Agent ready. Code: %s | LLM: %s", pairCode, apiModel)
+	log.Printf("Agent ready. Code: %s | LLM: %s", pairCode, llmCfg.Model)
 
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 
-	// Channel to serialize reads (gorilla/websocket is not concurrent-safe for reads)
 	readCh := make(chan map[string]interface{}, 16)
 
 	go func() {
@@ -126,6 +127,17 @@ func main() {
 	}
 }
 
+func readKey(envName, filePath string) string {
+	if k := os.Getenv(envName); k != "" {
+		return k
+	}
+	data, err := os.ReadFile(filePath)
+	if err == nil {
+		return strings.TrimSpace(string(data))
+	}
+	return ""
+}
+
 func handleMessage(conn *websocket.Conn, msg map[string]interface{}) {
 	method, _ := msg["method"].(string)
 
@@ -137,7 +149,7 @@ func handleMessage(conn *websocket.Conn, msg map[string]interface{}) {
 		log.Printf("📱 APK: [%s] %s", msgType, content)
 
 		if msgType == "chat" && content != "" {
-			reply, err := callDeepSeek(content)
+			reply, err := callLLM(content)
 			if err != nil {
 				log.Printf("LLM error: %v", err)
 				reply = "抱歉，我暂时无法回复。"
@@ -173,13 +185,13 @@ func sendVoiceChat(conn *websocket.Conn, text string) {
 	log.Printf("✅ Sent")
 }
 
-func callDeepSeek(prompt string) (string, error) {
+func callLLM(prompt string) (string, error) {
 	messages := []map[string]string{
 		{"role": "user", "content": prompt},
 	}
 
 	reqBody := map[string]interface{}{
-		"model":       apiModel,
+		"model":       llmCfg.Model,
 		"messages":    messages,
 		"max_tokens":  300,
 		"temperature": 0.3,
@@ -187,12 +199,12 @@ func callDeepSeek(prompt string) (string, error) {
 	}
 
 	body, _ := json.Marshal(reqBody)
-	httpReq, err := http.NewRequest("POST", apiBase+"/chat/completions", bytes.NewReader(body))
+	httpReq, err := http.NewRequest("POST", llmCfg.APIBase+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+llmCfg.APIKey)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(httpReq)
